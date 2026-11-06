@@ -21,14 +21,51 @@ Phase 3: Finish → verify the claim, preserve useful evidence and close the tas
 - Read only the relevant package rules and code. Do not scan every skill, agent,
   hook, platform or spec on each task.
 
+### Work context
+
+After understanding the request, choose the owning package and the applicable
+work types: `code`, `experiments`, `plotting`, `writing`, `research`. Combine types
+when needed; agent roles and keyword matches do not determine the work type.
+Read `.trellis/spec/index.md` for routing and the relevant shared spec bodies:
+`code.md`, `experiments.md`, `plotting.md`, `writing.md`, `research.md`. Read only
+the owning package's additional rules, docs and source needed for this work.
+These shared specs stay flat; packages do not need copies or a fixed file quota.
+
+Use `get_context.py --mode work --work-type <types> --package-path <dir>` to
+load the selected context. Work types may be comma-separated or repeated.
+Add `--research-record <md>` for an existing topic record and `--task <task>`
+when a task is supplied. No task is required. For a tracked task, the existing
+`task.json.meta` keys `work_types`, `package_path` and `research_record` can retain
+these selections through `task.py set-meta`: store work types as a comma-separated
+string and paths as project-relative strings. Do not add a context manifest.
+On resumption, `--mode work --task <task>` uses those selections. Reconsider
+them when the request changes instead of blindly reusing stale context.
+
+Read the relevant spec bodies before doing the work. An index, a path listing,
+`--summary` output or a hook-injected overview is not a substitute. If a hook
+has not supplied the relevant bodies, load them explicitly. When switching
+packages or work types, read the newly applicable rules before proceeding.
+
 ### Records and evidence
 
 - A task normally contains only `task.json` (metadata) and `prd.md` (the single
-  human task record: goal, scope, decisions, progress, conclusions and open questions).
-- Additional context manifests or research notes are optional, never start gates.
-- Package `docs/`: lasting mathematical/algorithmic knowledge and conclusions.
-  Package `cases/`: detailed cases. Package `runs/`: experiment configurations,
-  numerical results and figures. Git: code history. Do not duplicate these in tasks.
+  delivery record: goal, scope, acceptance and status). Link the research record
+  from the PRD; do not repeat the scientific account there.
+- Keep sustained scientific reasoning in the owning package's
+  `docs/research/<topic>.md`, one document per topic across tasks and sessions.
+  Under `## 当前研究状态`, keep the current question, judgment, unresolved issues
+  and next step. Below `## 阶段记录`, retain stages of substantive progress:
+  starting point, hypotheses and competing explanations; key testable
+  derivations, assumptions and unproved
+  steps; numerical choices tied to concrete implementation functions; links to
+  experiment runs; evidence assessment and consequent changes of route.
+- Update that topic document when the reasoning or evidence materially advances,
+  not on every session. Preserve rejected judgments with their counterevidence;
+  distinguish a conjecture, a derivation under assumptions and an observed result.
+  A small edit with no research progress does not need a research record.
+- Package `docs/`: lasting knowledge, including the topic records above.
+  Package `cases/`: detailed cases. Package `runs/`: configurations, numerical
+  results and figures. Git: code history. Link these rather than copying into tasks.
 - Never put experimental source, datasets or package copies in a task directory.
 - Preserve meaningful parameters, seeds when relevant, key results, useful figures,
   conclusions and an available code commit. A dirty tree must be disclosed; HEAD
@@ -70,15 +107,17 @@ completed implementation as proof of a research hypothesis.
 
 ### Commands
 
-Use `python` on Windows, or the available `python3` on other systems:
+Use `python` on Windows, or the available `python` on other systems:
 
 ```bash
 python .trellis/scripts/task.py create "<title>" --description "<goal>" --assignee <name>
 python .trellis/scripts/task.py start <task>
 python .trellis/scripts/task.py current --source
+python .trellis/scripts/task.py set-meta <task> work_types code,research
 python .trellis/scripts/task.py archive <task> --completed --no-commit
 python .trellis/scripts/task.py archive <task> --no-commit
 python .trellis/scripts/get_context.py --mode phase --step 2.1
+python .trellis/scripts/get_context.py --mode work --work-type code,research --package-path <dir>
 ```
 
 `create` activates the task when session identity is available. `start` marks a
@@ -94,31 +133,35 @@ mode requires a clean tree, commit, PR or branch metadata. Auto-commit is off by
 [workflow-state:no_task]
 Answer discussions directly. Make clear local changes without a task. For
 long-running work create a lightweight task and proceed within user authorization.
-Follow .trellis/workflow.md; do not ask for redundant task/start approval.
+Follow Work context in .trellis/workflow.md and read the selected spec bodies.
+Do not ask for redundant task/start approval.
 [/workflow-state:no_task]
 
 [workflow-state:planning]
-Read prd.md and relevant package rules. Keep planning in the PRD; no mandatory
-design.md, implement.md or JSONL. If implementation is authorized and the scope
-is clear, start and proceed. Ask only about material unresolved research choices.
+Read prd.md, selected work-type spec bodies and the linked research record.
+Follow Work context and Records and evidence above. If implementation is
+authorized and the scope is clear, start and proceed. Ask only about material
+unresolved research choices. No additional planning files or JSONL are required.
 [/workflow-state:planning]
 
 [workflow-state:planning-inline]
-Read prd.md and relevant package rules. No extra planning files or JSONL gates.
+Read prd.md, selected work-type spec bodies and the linked research record.
+Follow Work context and Records and evidence above. No extra files or JSONL gates.
 Start authorized work directly; delegate only when independent work benefits.
 [/workflow-state:planning-inline]
 
 [workflow-state:in_progress]
 Work within the assigned scope. Main agents implement directly; workers do their
 assigned work without recursively launching a fixed pipeline. Verify only what
-the implementation or scientific claim needs. Preserve useful evidence in its
-package. When complete, update the PRD, archive --completed --no-commit and report.
+the implementation or scientific claim needs. Follow Work context and Records
+and evidence above when the scope changes or research advances. When complete,
+update the PRD, archive --completed --no-commit and report.
 No default Git writes, journal, full test suite or extra approval to finish.
 [/workflow-state:in_progress]
 
 [workflow-state:in_progress-inline]
 Implement directly, with optional scoped delegation. Use targeted verification;
-keep scientific evidence, not engineering ceremony. Update the PRD and archive
+follow Work context and Records and evidence above. Update the PRD and archive
 --completed --no-commit when done. No default Git writes or journal.
 [/workflow-state:in_progress-inline]
 
@@ -147,14 +190,15 @@ Use the brainstorm skill only when uncertainty actually warrants it.
 
 #### 1.2 Read relevant context
 
-Read the affected package docs, code and existing focused checks. Optional
+Follow Work context above to load the selected spec bodies and existing topic
+record, then read the affected package code and existing focused checks. Optional
 specialist research should answer a concrete question, not generate a dossier.
 
 #### 1.3 Record useful context
 
-For a tracked task, keep the goal, constraints and decisions in prd.md. Context
-JSONL is optional for workers who need specific references; no separate design or
-implementation document is required.
+Follow Records and evidence above. A tracked task's PRD records delivery scope
+and status and links the topic document. Retain selected work context in task
+metadata when useful for resumption. No additional context file is required.
 
 #### 1.4 Begin authorized work
 
@@ -175,7 +219,8 @@ flow where appropriate. Do not introduce abstractions, dependencies or tools
 merely for reuse. Main agents work directly; use optional specialist workers only
 when a distinct responsibility benefits from delegation.
 For research, choose a minimal experiment that distinguishes competing hypotheses,
-inspect the results and adjust the route within the agreed scope.
+inspect the results and adjust the route within the agreed scope. Update the
+topic record at substantive advances as described in Records and evidence.
 
 #### 2.2 Verify the actual claim
 
@@ -193,12 +238,14 @@ without need. Ask only if resolution needs a material scope/authority change.
 #### 3.2 Capture a useful finding
 
 For a recurring or scientifically meaningful issue, retain its cause or negative
-result in the existing appropriate record. No automatic retrospective report.
+result in the existing appropriate record under Records and evidence. No
+automatic retrospective report.
 
 #### 3.3 Update lasting knowledge when needed
 
-Update package docs or a relevant shared convention only if the finding will help
-future work. Task progress stays in the PRD; do not copy it into a journal.
+Update the topic record for substantive research progress, or a relevant shared
+spec for a reusable convention. Delivery status stays in the PRD; link lasting
+knowledge instead of copying it into tasks or journals.
 
 #### 3.4 Respect Git intent
 

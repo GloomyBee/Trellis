@@ -8,8 +8,9 @@ Trellis context injection aims to make AI read the right files at the right time
 | --- | --- | --- |
 | session context | `.trellis/scripts/get_context.py` | Current developer, git status, active task, active tasks, journal, packages. |
 | workflow context | `.trellis/workflow.md` | Current Trellis flow and next action. |
-| spec context | `.trellis/spec/` + task JSONL | Specs that must be followed during implementation/checking. |
-| task context | `.trellis/tasks/<task>/prd.md`, `design.md`, `implement.md`, `research/` | Current task requirements, design, execution plan, and research. |
+| work context | `get_context.py --mode work` | Explicit work types, selected package rules and current research state. |
+| extra spec context | Optional task JSONL | Additional curated references for a worker. |
+| task context | `.trellis/tasks/<task>/prd.md` plus optional notes | Delivery scope and status; links to scientific evidence. |
 | platform context | Platform hooks/settings/agents | Lets different AI tools read the files above through their own mechanisms. |
 
 ## session-start
@@ -20,6 +21,7 @@ Platforms with session-start support inject a Trellis overview when a session st
 - current task status.
 - active tasks.
 - spec index paths.
+- selected work scope and a linked research record's current state, not its history.
 - developer identity and git status.
 
 If the user feels the AI does not know the current task in a new session, first check whether the platform's session-start hook or equivalent mechanism is installed and running.
@@ -32,12 +34,16 @@ If the user wants to change "what the AI should do next in a given state," edit 
 
 ## sub-agent context
 
-Implement and check agents need task context. Trellis has two loading modes:
+Agents need the context for their assignment, not necessarily a task. Two modes:
 
-1. **hook push**: a platform hook injects jsonl-referenced files plus `prd.md`, `design.md` if present, and `implement.md` if present before the agent starts.
-2. **agent pull**: the agent definition instructs the agent to read the active task, jsonl context, and task artifacts after startup.
+1. **hook push**: scoped rule bodies/current research state, optional JSONL and task artifacts share one configured budget.
+2. **agent pull**: an agent reads selected work context and relevant bodies directly, adding supplied task context when present.
 
-In both modes, JSONL files in the task directory are the manifest for spec/research context. Task artifacts are read separately in this order: `prd.md` -> `design.md if present` -> `implement.md if present`.
+Scope comes from explicit arguments or task metadata (`work_types`,
+`package_path`, `research_record`). Hooks do not infer it from keywords.
+Missing optional manifests do not block work. Current-state excerpts must not
+be replaced with the full record by duplicate manifest reads. Summaries and
+indexes are navigation: read omitted bodies/history when the assignment needs them.
 
 ## JSONL Reading Rules
 

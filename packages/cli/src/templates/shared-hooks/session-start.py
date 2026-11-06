@@ -572,6 +572,8 @@ def _resolve_spec_scope(
 
 def _collect_spec_index_paths(trellis_dir: Path, allowed_pkgs: set | None) -> list[str]:
     paths: list[str] = []
+    if (trellis_dir / "spec" / "index.md").is_file():
+        paths.append(".trellis/spec/index.md")
     guides_index = trellis_dir / "spec" / "guides" / "index.md"
     if guides_index.is_file():
         paths.append(".trellis/spec/guides/index.md")
@@ -599,6 +601,18 @@ def _collect_spec_index_paths(trellis_dir: Path, allowed_pkgs: set | None) -> li
                 paths.append(f".trellis/spec/{sub.name}/{nested.name}/index.md")
 
     return paths
+
+
+def _get_work_summary(trellis_dir: Path, hook_input: dict) -> str:
+    try:
+        from common.packages_context import get_work_context_text
+
+        active = _resolve_active_task(trellis_dir, hook_input)
+        return get_work_context_text(
+            trellis_dir.parent, task_dir=active.task_path or "", summary=True
+        )
+    except Exception as exc:
+        return f"[Trellis] Work context unavailable: {exc}; load relevant guidance directly."
 
 
 def _build_compact_current_state(
@@ -797,10 +811,12 @@ Trellis compact SessionStart context. Use it to orient the session; load details
 
     output.write("<guidelines>\n")
     output.write(
-        "Task context order for implementation/check: jsonl entries -> `prd.md` -> "
+        "Task context order for implementation/check: scoped work guidance -> optional jsonl entries -> `prd.md` -> "
         "`design.md if present` -> `implement.md if present`. Missing optional artifacts "
         "are skipped for lightweight tasks.\n\n"
     )
+    output.write(_get_work_summary(trellis_dir, hook_input))
+    output.write("\n\nIndexes are discovery only; read selected rule bodies before working.\n\n")
 
     if spec_index_paths:
         output.write("## Available indexes (read on demand)\n")

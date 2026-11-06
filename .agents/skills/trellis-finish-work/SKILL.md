@@ -1,12 +1,16 @@
 ---
 name: trellis-finish-work
-description: "Close completed work with proportionate verification, update its PRD and archive without automatic Git writes or journals. Use when finishing an implementation task."
+description: "Close completed work with proportionate verification and delivery status; preserve substantive research progress in the linked package record. Use when finishing a task or local change."
 ---
 
 # Finish Work
 
+This finish-work entry point follows the shared workflow, not a separate checklist.
+
 Follow Phase 3 in `.trellis/workflow.md`. Use only the verification needed for
-the changed behavior or scientific claim. Update the existing task PRD if tracked.
+the changed behavior or scientific claim. Follow Records and evidence there:
+update a topic record after substantive research progress and link it from the
+tracked PRD, whose purpose is delivery scope and status. Small edits need no record.
 
 When the goal is genuinely achieved:
 ```bash

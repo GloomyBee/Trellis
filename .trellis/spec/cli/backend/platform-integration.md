@@ -1211,11 +1211,20 @@ Platform's hook either does not expose a sub-agent-start event or cannot inject 
 
 Sub-agents on class-2 platforms run as **separate sessions** with their own session ids, and no session identity reaches them: the parent's key is not exported into the child, and on most platforms no session env var exists to export in the first place (see `### Active Task Resolution`). So the session-scoped resolver returns `None` for the sub-agent's own session key. To bridge that gap the prelude (`buildPullBasedPrelude` in `src/configurators/shared.ts`) tells sub-agents to discover the active task in this order:
 
-1. **`Active task: <path>` line in dispatch prompt** — primary path. The main agent is required by `workflow.md`'s `[workflow-state:in_progress]` breadcrumb to prefix every sub-agent dispatch (including `trellis-research`, since 0.5.8) with `Active task: <path from task.py current>`. The breadcrumb fires on every `UserPromptSubmit` while `task.json.status == in_progress`, so the rule is reinjected per turn.
+1. **`Active task: <path>` line in dispatch prompt** — use this explicit assignment when supplied. The native workflow allows self-contained assignments without a task; it does not require creating a task or adding a task prefix to every dispatch.
 2. **`task.py current --source`** — secondary. Resolves via the session-scoped runtime store. Returns `Source: session:<key>` on a precise match, or `Source: session-fallback:<key>` when the runtime contains exactly one session file (single-window inference; see `_resolve_single_session_fallback` in `active_task.py`). Returns nothing when ≥2 session files exist — refuses to guess across windows so 04-21's multi-session isolation contract holds.
-3. **Ask the user** — terminal fallback when both above yield nothing.
+3. **Self-contained assignment** — with no active task, use the assigned scope and load relevant context under Work context in `.trellis/workflow.md`. Ask only when the assignment itself is insufficient, not because a task or manifest is absent.
 
-When changing the prelude, the dispatch protocol, or the `session-fallback` semantics, all three layers must stay aligned. `regression.test.ts > [issue-225]` and `regression.test.ts > [session-fallback]` are the contract tests; `templates/trellis.test.ts > [issue-225]` asserts the workflow.md breadcrumb still carries the protocol. Manual e2e runbook lives in the historical task `.trellis/tasks/<archive>/05-04-fix-codex-subagent-missing-active-task/manual-verify.md`.
+Task discovery and the scoped work-context loader serve different purposes.
+`get_context.py --mode work` reads selected work-type specs, package context and
+an optional research record, with or without a task. Workers must read the
+relevant spec bodies even when a hook has supplied only an overview. Selection
+and record policy live in the workflow; entry points reference that policy.
+
+When changing task discovery or `session-fallback` semantics, keep the runtime,
+dispatch and prelude aligned. Existing focused regression checks cover those
+boundaries. The historical manual runbook lives in
+`.trellis/tasks/<archive>/05-04-fix-codex-subagent-missing-active-task/manual-verify.md`.
 
 ### Class-3 — Extension-backed (2 platforms)
 

@@ -30,6 +30,7 @@ import {
   prependEphemeralText,
 } from "../lib/context-visibility.js"
 import { TrellisContext, debugLog, isTrellisSubagent } from "../lib/trellis-context.js"
+import { loadWorkContext } from "../lib/session-utils.js"
 
 // Supports STATUS values with letters, digits, underscores, hyphens
 // (so "in-review" / "blocked-by-team" work alongside "in_progress").
@@ -220,7 +221,9 @@ export default async ({ directory }) => {
             ? buildBreadcrumb(task.id, task.status, templates, task.source)
             : buildBreadcrumb(null, "no_task", templates)
 
-          prependEphemeralText(messages, breadcrumb)
+          const workSummary = loadWorkContext(ctx, platformInput)
+          const workContext = workSummary ? `<work-context>\n${workSummary}\n</work-context>` : ""
+          prependEphemeralText(messages, [breadcrumb, workContext].filter(Boolean).join("\n\n"))
           debugLog(
             "workflow-state",
             "Injected breadcrumb for task",

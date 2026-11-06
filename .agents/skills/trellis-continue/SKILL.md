@@ -1,11 +1,12 @@
 ---
 name: trellis-continue
-description: "Resume work on the current task. Loads the workflow Phase Index, figures out which phase/step to pick up at, then pulls the step-level detail via get_context.py --mode phase. Use when coming back to an in-progress task and you need to know what to do next."
+description: "Resume a tracked task with its selected work-type specs, package context and linked research record, then follow the current workflow step. Use when returning to an in-progress task."
 ---
 
 # Continue Current Task
 
-Resume the current task by loading its state, then reading the matching step in `.trellis/workflow.md`.
+Resume the current task by loading its state, selected work context and matching
+step in `.trellis/workflow.md`.
 
 ---
 
@@ -17,7 +18,22 @@ python ./.trellis/scripts/get_context.py
 
 Confirms: current task, git state, recent commits.
 
-## Step 2: Load the Phase Index
+## Step 2: Restore work context
+
+Read the task PRD for delivery scope/status, then restore its selected context:
+
+```bash
+python ./.trellis/scripts/get_context.py --mode work --task <task>
+```
+
+Follow Work context and Records and evidence in `.trellis/workflow.md`. Read
+the selected spec bodies and linked topic record, beginning with its current
+research state. An index or summary alone does not satisfy the spec read.
+If metadata is absent or stale, choose the package and types from the request,
+pass the corresponding options and retain useful selections in task metadata.
+Read newly applicable rules when switching packages or work types.
+
+## Step 3: Load the Phase Index
 
 ```bash
 python ./.trellis/scripts/get_context.py --mode phase
@@ -25,7 +41,7 @@ python ./.trellis/scripts/get_context.py --mode phase
 
 Shows the Phase Index (Plan / Execute / Finish) with routing + skill mapping.
 
-## Step 3: Resume Where You Are
+## Step 4: Resume Where You Are
 
 Route by the task's `status` and what its directory actually contains:
 
@@ -34,9 +50,10 @@ Route by the task's `status` and what its directory actually contains:
 - `in_progress` → continue the work. Do not re-request approval for work the user already authorized.
 - done → archive it (see ``finish-work` (Trellis command)`).
 
-`design.md`, `implement.md`, and the JSONL manifests are optional — add one only when the task is large enough to justify it. A task carrying only `prd.md` is complete and valid.
+No additional planning document or context manifest is required. Scientific
+reasoning stays in the linked package topic record under the workflow rules.
 
-## Step 4: Load the Specific Step
+## Step 5: Load the Specific Step
 
 ```bash
 python ./.trellis/scripts/get_context.py --mode phase --step <X.X> --platform codex

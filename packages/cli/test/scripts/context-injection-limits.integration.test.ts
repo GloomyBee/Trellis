@@ -42,9 +42,11 @@ describe("task_context.py Python compatibility", () => {
   });
 });
 
+const PYTHON = process.platform === "win32" ? "python" : "python3";
+
 function hasPython(): boolean {
   try {
-    execFileSync("python3", ["--version"], { stdio: "ignore" });
+    execFileSync(PYTHON, ["--version"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -77,14 +79,14 @@ spec.loader.exec_module(mod)
 ${code}
 `;
   fs.writeFileSync(probePath, script, "utf-8");
-  const r = spawnSync("python3", [probePath], {
+  const r = spawnSync(PYTHON, [probePath], {
     cwd: tmp,
     encoding: "utf-8",
   });
   if (r.status !== 0) {
     throw new Error(`probe failed (rc=${r.status}): ${r.stderr}`);
   }
-  return r.stdout;
+  return r.stdout.replace(/\r\n/g, "\n");
 }
 
 function runConfigProbe(tmp: string, code: string): string {
@@ -98,7 +100,7 @@ REPO_ROOT = Path(${JSON.stringify(tmp)})
 ${code}
 `;
   fs.writeFileSync(probePath, script, "utf-8");
-  const r = spawnSync("python3", [probePath], {
+  const r = spawnSync(PYTHON, [probePath], {
     cwd: tmp,
     encoding: "utf-8",
   });
@@ -140,7 +142,7 @@ function runTaskValidate(
   taskDir: string,
 ): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync(
-    "python3",
+    PYTHON,
     [path.join(tmp, ".trellis", "scripts", "task.py"), "validate", taskDir],
     { cwd: tmp, encoding: "utf-8" },
   );
@@ -234,7 +236,7 @@ print(get_context_injection_limits(Path(${JSON.stringify(tmp)}))["max_file_bytes
 `,
           "utf-8",
         );
-        const r = spawnSync("python3", [probePath], {
+        const r = spawnSync(PYTHON, [probePath], {
           cwd: tmp,
           encoding: "utf-8",
         });
@@ -262,7 +264,7 @@ print(get_context_injection_limits(Path(${JSON.stringify(tmp)}))["max_artifact_b
 `,
           "utf-8",
         );
-        const r = spawnSync("python3", [probePath], {
+        const r = spawnSync(PYTHON, [probePath], {
           cwd: tmp,
           encoding: "utf-8",
         });
@@ -270,6 +272,165 @@ print(get_context_injection_limits(Path(${JSON.stringify(tmp)}))["max_artifact_b
         expect(r.stdout.trim()).toBe("65536");
         expect(r.stderr).toContain(
           "invalid context_injection.max_artifact_bytes",
+        );
+      });
+    });
+
+    describe("scoped work context", () => {
+      function runWork(...args: string[]): string {
+        const result = spawnSync(
+          PYTHON,
+          [
+            path.join(tmp, ".trellis/scripts/get_context.py"),
+            "--mode",
+            "work",
+            ...args,
+          ],
+          { cwd: tmp, encoding: "utf-8" },
+        );
+        if (result.status !== 0) {
+          throw new Error(`work context failed: ${result.stderr}`);
+        }
+        return result.stdout;
+      }
+
+      it("loads flat specs without a task and only selects explicit work types", () => {
+        const spec = path.join(tmp, ".trellis/spec");
+        fs.mkdirSync(spec, { recursive: true });
+        for (const name of [
+          "index",
+          "code",
+          "research",
+          "experiments",
+          "writing",
+        ]) {
+          fs.writeFileSync(path.join(spec, `${name}.md`), `${name} guidance\n`);
+        }
+        const output = runWork(
+          "--work-type",
+          "code,research",
+          "--work-type",
+          "code",
+        );
+        expect(output).toContain("Work types: code, research");
+        expect(output).toContain("index guidance");
+        expect(output).toContain("code guidance");
+        expect(output).toContain("research guidance");
+        expect(output).toContain("experiments guidance");
+        expect(output).not.toContain("writing guidance");
+        expect(runWork("--summary")).toContain("Main agent: choose work types");
+        const packages = spawnSync(
+          PYTHON,
+          [
+            path.join(tmp, ".trellis/scripts/get_context.py"),
+            "--mode",
+            "packages",
+            "--json",
+          ],
+          { cwd: tmp, encoding: "utf-8" },
+        );
+        expect(packages.status).toBe(0);
+        expect(JSON.parse(packages.stdout)).toMatchObject({
+          specIndex: ".trellis/spec/index.md",
+          specFiles: expect.arrayContaining([".trellis/spec/code.md"]),
+        });
+      });
+
+      it("uses task metadata and package mapping, with explicit CLI values taking precedence", () => {
+        const taskDir = makeTask(tmp, "work-context");
+        fs.writeFileSync(
+          path.join(taskDir, "task.json"),
+          JSON.stringify({
+            status: "in_progress",
+            package: "algorithm",
+            meta: {
+              work_types: "research",
+              research_record: "algorithm/docs/research.md",
+            },
+          }),
+        );
+        fs.mkdirSync(path.join(tmp, "algorithm/docs"), { recursive: true });
+        fs.writeFileSync(
+          path.join(tmp, "algorithm/docs/research.md"),
+          "# Research\n## Current phase\nCurrent hypothesis\n## Stage 1\nOld failed approach\n",
+        );
+        fs.writeFileSync(
+          path.join(tmp, "algorithm/README.md"),
+          "Package readme body\n",
+        );
+        writeConfig(tmp, "packages:\n  algorithm:\n    path: algorithm\n");
+        const inherited = runWork("--task", taskDir, "--summary");
+        expect(inherited).toContain("Work types: research");
+        expect(inherited).toContain("Package: algorithm");
+        expect(inherited).toContain("Current hypothesis");
+        expect(inherited).not.toContain("Old failed approach");
+        expect(inherited).not.toContain("Package readme body");
+        expect(inherited).toContain("read directly for full history");
+        const explicit = JSON.parse(
+          runWork(
+            "--task",
+            taskDir,
+            "--work-type",
+            "writing",
+            "--package-path",
+            ".",
+            "--json",
+          ),
+        );
+        expect(explicit.workTypes).toEqual(["writing"]);
+        expect(explicit.packagePath).toBe(".");
+      });
+
+      it("shares configured byte budgets, preserves UTF-8 and names every truncated file", () => {
+        const spec = path.join(tmp, ".trellis/spec");
+        fs.mkdirSync(spec, { recursive: true });
+        fs.writeFileSync(path.join(spec, "index.md"), "中".repeat(20));
+        fs.writeFileSync(path.join(spec, "code.md"), "文".repeat(20));
+        writeConfig(
+          tmp,
+          "context_injection:\n  max_file_bytes: 7\n  max_artifact_bytes: 10\n  max_total_bytes: 20\n",
+        );
+        const result = JSON.parse(runWork("--work-type", "code", "--json")) as {
+          files: { file: string; content: string; truncated: boolean }[];
+          warnings: string[];
+        };
+        expect(result.files.map((entry) => entry.content)).toEqual([
+          "中中",
+          "文",
+        ]);
+        expect(result.files.every((entry) => entry.truncated)).toBe(true);
+        expect(result.warnings.join("\n")).toContain(".trellis/spec/code.md");
+        expect(runWork("--work-type", "code")).toContain(
+          "[Trellis: truncated — .trellis/spec/code.md",
+        );
+      });
+
+      it("refuses paths and symlinks outside the repository", () => {
+        const result = JSON.parse(
+          runWork(
+            "--package-path",
+            "..",
+            "--research-record",
+            "../outside.md",
+            "--json",
+          ),
+        );
+        expect(result.packagePath).toBeNull();
+        expect(result.researchRecord).toBeNull();
+        expect(result.warnings.join("\n")).toContain(
+          "Refused path outside the project",
+        );
+        fs.symlinkSync(
+          path.dirname(tmp),
+          path.join(tmp, "external"),
+          process.platform === "win32" ? "junction" : "dir",
+        );
+        const linked = JSON.parse(
+          runWork("--package-path", "external", "--json"),
+        );
+        expect(linked.packagePath).toBeNull();
+        expect(linked.warnings.join("\n")).toContain(
+          "Refused path outside the project",
         );
       });
     });
@@ -693,10 +854,8 @@ print("all-valid")
       });
     });
 
-    describe("inject-subagent-context.py: empty-manifest notice (#573)", () => {
-      it("puts a visible notice in the prompt when the manifest has no curated entries", () => {
-        // The stderr WARN never reaches any session; the sub-agent must see
-        // in its own prompt that no spec context was injected.
+    describe("inject-subagent-context.py: optional empty manifest", () => {
+      it("prompts for work types without warning about an empty optional manifest", () => {
         const taskDir = makeTask(tmp, "task-seed-only");
         fs.writeFileSync(path.join(taskDir, "implement.jsonl"), "", "utf-8");
         fs.writeFileSync(path.join(taskDir, "prd.md"), "prd body\n", "utf-8");
@@ -705,11 +864,9 @@ print("all-valid")
           tmp,
           `print(mod.get_implement_context(REPO_ROOT, ${JSON.stringify(relTask)}))`,
         );
-        expect(out).toContain(
-          `[Trellis] ${relTask}/implement.jsonl has no curated entries`,
-        );
-        expect(out).toContain(".trellis/spec/");
-        // Task artifacts still follow the notice.
+        expect(out).toContain("Main agent: choose work types for this task");
+        expect(out).not.toContain("has no curated entries");
+        // Task artifacts remain available without a curated manifest.
         expect(out).toContain("prd body");
       });
 
@@ -840,7 +997,7 @@ print("all-valid")
           "print('ERRORS=%d' % errors)",
         ].join("\n");
 
-        const r = spawnSync("python3", ["-c", harness], {
+        const r = spawnSync(PYTHON, ["-c", harness], {
           cwd: tmp,
           encoding: "utf-8",
         });

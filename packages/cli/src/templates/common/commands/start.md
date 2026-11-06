@@ -5,7 +5,7 @@ Thin entry point: load current state, then read the one section of `.trellis/wor
 ---
 
 ## Step 1: Current state
-Identity, git status, current task, active tasks, journal location.
+Read the current identity, git state and active task when present.
 
 ```bash
 {{PYTHON_CMD}} ./.trellis/scripts/get_context.py
@@ -13,18 +13,22 @@ Identity, git status, current task, active tasks, journal location.
 
 If this output includes a line beginning `Trellis update available:`, copy the full line verbatim when summarizing session context. Do not shorten operational command hints.
 
-## Step 2: Triage the request
+## Step 2: Select and read work context
 
-| Request shape | What to do |
-|---|---|
-| Discussion, question, design opinion | Answer directly. No task, no planning artifacts. |
-| Local change in one obvious place | Do it now. A task is optional; skip it for a one-shot fix. |
-| Work spanning turns, or work that needs a written record | Create or resume a task. `task.json` + `prd.md` is the only human record required. |
-| Major change of scientific route, or a high-cost run | Confirm with the user before starting. |
+Follow Request routing and Work context in `.trellis/workflow.md`. Understand
+the request, then choose its package and work types; do not infer them from
+keywords or agent names. Load the selected context:
 
-`design.md`, `implement.md`, `implement.jsonl`, `check.jsonl` are optional. Add one only when the task is big enough that the note saves more time than it costs. If the user already authorized the work, keep going — do not re-request approval each turn.
+```bash
+{{PYTHON_CMD}} ./.trellis/scripts/get_context.py --mode work --work-type <types> --package-path <dir>
+```
 
-## Step 3: Load only the step you need
+Use `--task <task>` for a tracked task, or `--research-record <md>` for an
+existing topic document. Read the selected spec bodies and relevant record;
+an index or hook overview alone is insufficient. Reuse task metadata on
+resumption and refresh context when packages or work types change.
+
+## Step 3: Load the workflow step
 
 ```bash
 {{PYTHON_CMD}} ./.trellis/scripts/get_context.py --mode phase --step <X.X> --platform {{CLI_FLAG}}
@@ -34,26 +38,6 @@ If this output includes a line beginning `Trellis update available:`, copy the f
 
 ## Step 4: Do the work
 
-Work in the main session directly. Dispatch a sub-agent only when a piece of work is genuinely independent — there is no fixed pipeline and no required agent count.
-
-Verify at the level the work needs:
-
-- the thing must run → run it once
-- values or behavior must be correct → check the values you depend on
-- a scientific conclusion must hold → point at the evidence (run, data, comparison, citation)
-
-No default full lint / typecheck / unit-test sweep. Run those when the change touches types or shared contracts.
-
----
-
-## Skill routing (quick reference)
-
-| User intent | Skill |
-|---|---|
-| Requirements unclear / deciding an approach | `trellis-brainstorm` |
-| About to write code | `trellis-before-dev` |
-| Wanting a quality pass | `trellis-check` |
-| Stuck on the same bug repeatedly | `trellis-break-loop` |
-| Something worth capturing | `trellis-update-spec` |
-
-Full rules live in `.trellis/workflow.md`.
+Follow the loaded step, Scientific verification, Records and evidence, and Skill
+Routing in `.trellis/workflow.md`. Small changes need no task or research record.
+Continue work already authorized without another start approval.

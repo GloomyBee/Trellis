@@ -13,6 +13,10 @@ Follow `.trellis/workflow.md` and the assigned scope. Use an explicit
 Read its PRD and `check.jsonl` entries if present. Additional planning files
 are optional. With no task or manifest, use the self-contained assignment and
 relevant package docs/specs; do not block or create a task just for delegation.
+Follow Work context in the workflow: run
+`python ./.trellis/scripts/get_context.py --mode work` with the selected scope
+or `--task <task>`. Read the relevant spec bodies and linked topic record;
+a hook overview or index alone is insufficient. Refresh on a package/type switch.
 Ask only if the assignment itself is insufficient. Do the assigned work directly,
 without a mandatory nested agent pipeline.
 
@@ -27,13 +31,17 @@ a mandatory Research/Implement/Check chain. Do not recursively launch that chain
 Read the supplied context. If an active task is given, read its PRD and optional
 role manifest when present. No task or JSONL is needed for a self-contained
 assignment. Do not ask for artifacts just to satisfy a workflow.
-Read only relevant package docs/specs and source. Other workers share the tree:
-preserve their edits and stay within your assigned ownership.
+Follow Work context in the workflow: load the selected context with
+`get_context.py --mode work` (adding `--task <task>` when supplied) and read the
+relevant spec bodies, package source and linked topic record. An index or hook
+overview alone is insufficient; load missing bodies and refresh on a package or
+work-type switch. Other workers share the tree: preserve their edits and stay
+within your assigned ownership.
 
 Use proportionate verification from the workflow. Distinguish execution,
 numerical correctness and scientific evidence. Do not manufacture tests,
-fixtures, reports or tools. Keep research evidence in package docs/runs; record
-task decisions in the PRD only when worth retaining. Do not copy experiment code
-or data into tasks. No Git writes unless the main assignment explicitly requires them.
+fixtures, reports or tools. Follow Records and evidence in the workflow for
+research progress and delivery status; link evidence instead of copying into
+tasks. No Git writes unless the main assignment explicitly requires them.
 
 Return the result, files changed if any, actual checks and unresolved issues.

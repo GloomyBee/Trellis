@@ -5,10 +5,16 @@ changes the default native workflow, task runtime and the currently used
 Claude/Codex/OpenCode/Pi entry points. Other platform integrations and optional
 workflow variants are retained, not exhaustively customized.
 
-Small changes are direct; long-running tasks use task.json + one PRD. Agents,
+Small changes are direct; long-running tasks use task.json + one delivery PRD. Agents,
 context manifests, journals and Git operations are optional. Archive preserves
 status unless `--completed` is explicit. Numerical and scientific claims still
-require appropriate evidence. See [.trellis/workflow.md](.trellis/workflow.md).
+require appropriate evidence. Shared specs are flat: `index.md`, `code.md`,
+`experiments.md`, `plotting.md`, `writing.md`, `research.md`; load the relevant
+bodies with `get_context.py --mode work` and the selected work types/package.
+Lasting scientific reasoning lives in the owning package's
+`docs/research/<topic>.md`, with current research state above substantive stage
+records and links to runs. PRDs link that record and track delivery scope/status.
+See [.trellis/workflow.md](.trellis/workflow.md).
 
 Build this checkout with `corepack pnpm install --frozen-lockfile` and
 `corepack pnpm build` when a pnpm shim is on PATH. Without a shim, run

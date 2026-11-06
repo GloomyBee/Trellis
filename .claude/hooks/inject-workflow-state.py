@@ -446,6 +446,19 @@ def main() -> int:
         parts.append(breadcrumb)
         breadcrumb = "\n\n".join(parts)
 
+    try:
+        from common.packages_context import get_work_context_text
+
+        active = _resolve_active_task(root, data)
+        # An explicit empty reference prevents a second session lookup when
+        # this hook has already established that the current session has no task.
+        work_context = get_work_context_text(
+            root, task_dir=active.task_path or "", summary=True
+        )
+        breadcrumb += f"\n\n<work-context>\n{work_context}\n</work-context>"
+    except Exception as exc:
+        print(f"[Trellis] Work context unavailable: {exc}", file=sys.stderr)
+
     # Kiro (CLI userPromptSubmit / IDE promptSubmit) adds a hook's stdout
     # directly to the conversation context — no JSON envelope. Emit the bare
     # breadcrumb text. Conditionally isolated: all other platforms keep the

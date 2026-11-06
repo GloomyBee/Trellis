@@ -7,6 +7,29 @@ import { debugLog } from "./trellis-context.js"
 
 const PYTHON_CMD = platform() === "win32" ? "python" : "python3"
 
+// Python owns work-type/package selection; platform entry points only transport it.
+export function loadWorkContext(ctx, platformInput = null, { summary = true, taskDir = null } = {}) {
+  const script = join(ctx.directory, ".trellis", "scripts", "get_context.py")
+  if (!existsSync(script)) return summary ? "" : null
+  const contextKey = typeof ctx.getContextKey === "function" ? ctx.getContextKey(platformInput) : null
+  const args = [script, "--mode", "work", summary ? "--summary" : "--json"]
+  if (taskDir !== null) args.push("--task", taskDir)
+  try {
+    const output = execFileSync(PYTHON_CMD, args, {
+      cwd: ctx.directory,
+      timeout: 5000,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...(contextKey ? { TRELLIS_CONTEXT_ID: contextKey } : {}) },
+    }).trim()
+    return summary ? output : JSON.parse(output)
+  } catch (error) {
+    debugLog("work-context", "Unable to load scoped context:", error.message)
+    const warning = "Work context unavailable; run .trellis/scripts/get_context.py --mode work directly."
+    return summary ? `[Trellis: ${warning}]` : { files: [], warnings: [warning] }
+  }
+}
+
 const FIRST_REPLY_NOTICE = `<first-reply-notice>
 On the first visible assistant reply in this session, briefly acknowledge that Trellis SessionStart context loaded.
 Choose the acknowledgment language in this order:
@@ -145,6 +168,10 @@ function resolveSpecScope(config) {
 function collectSpecIndexPaths(directory, allowedPkgs) {
   const specDir = join(directory, ".trellis", "spec")
   const paths = []
+
+  if (existsSync(join(specDir, "index.md"))) {
+    paths.push(".trellis/spec/index.md")
+  }
 
   const guidesIndex = join(specDir, "guides", "index.md")
   if (existsSync(guidesIndex)) {
@@ -366,6 +393,9 @@ Trellis compact SessionStart context. Use it to orient the session; load details
     "`python3 ./.trellis/scripts/get_context.py --mode packages`"
   )
   parts.push("</guidelines>")
+
+  const workSummary = loadWorkContext(ctx, platformInput)
+  if (workSummary) parts.push(`<work-context>\n${workSummary}\n</work-context>`)
 
   const taskStatus = getTaskStatus(ctx, platformInput)
   parts.push(`<task-status>\n${taskStatus}\n</task-status>`)

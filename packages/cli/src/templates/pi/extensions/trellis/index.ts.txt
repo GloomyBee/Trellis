@@ -1187,6 +1187,11 @@ function workflowOverview(root: string, key: string | null): string {
   return stdout ? `<trellis-workflow>\n${stdout}\n</trellis-workflow>` : "";
 }
 
+function workOverview(root: string, key: string | null): string {
+  const stdout = runContextScript(root, key, ["--mode", "work", "--summary"]);
+  return stdout ? `<work-context>\n${stdout}\n</work-context>` : "";
+}
+
 function buildStartupContext(
   root: string,
   key: string | null,
@@ -1198,32 +1203,103 @@ function buildStartupContext(
     FIRST_REPLY_NOTICE,
     overview,
     workflow,
+    workOverview(root, key),
     "<ready>\nUse the current workflow state to decide whether to create, continue, or skip a Trellis task.\n</ready>",
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-function buildContext(root: string, agent: string, key: string | null): string {
+function canonicalContextPath(root: string, file: string): string | null {
+  try {
+    const target = realpathSync(isAbsolute(file) ? file : join(root, file));
+    const rel = relative(realpathSync(root), target);
+    if (rel.startsWith("..") || isAbsolute(rel)) return null;
+    const path = target.replace(/\\/g, "/").replace(/\/$/, "");
+    return process.platform === "win32" ? path.toLowerCase() : path;
+  } catch {
+    return null;
+  }
+}
+
+function buildContext(root: string, agent: string, key: string | null, summary = false): string {
   const dir = readTaskDir(root, key);
-  if (!dir)
-    return "No active Trellis task found. Read .trellis/ before proceeding.";
-  const relTaskDir = relative(root, dir).replace(/\\/g, "/");
   const limits = readContextInjectionLimits(root);
   const budget = new ContextBudget(limits.max_total_bytes);
 
-  // 1. Curated spec/research files from {agent}.jsonl (same order, budget
-  //    processed first, matching Python's get_agent_context()).
-  const jsonlName = TRELLIS_AGENT_JSONL[agent] ?? "";
+  // Python owns scope selection and the current-state/history boundary. Keep
+  // its returned bodies rather than rereading a research record in full.
+  const workArgs = ["--mode", "work", "--json", ...(summary ? ["--summary"] : [])];
+  workArgs.push("--task", dir ?? "");
+  const workOutput = runContextScript(root, key, workArgs);
   const specBlocks: string[] = [];
-  if (jsonlName) {
+  const selectedPaths = new Set<string>();
+  const notes: string[] = [];
+  let scopeResolutionFailed = false;
+  const appendNotes = (): void => {
+    for (const note of notes) {
+      const notice = `[Trellis: ${note}]`;
+      const size = Buffer.byteLength(notice, "utf-8");
+      if (budget.hasRoom(size)) {
+        budget.add(size);
+        specBlocks.push(notice);
+      }
+    }
+  };
+  if (workOutput) {
+    try {
+      const work = JSON.parse(workOutput) as JsonObject;
+      for (const item of Array.isArray(work.files) ? work.files : []) {
+        if (!isObj(item) || typeof item.file !== "string" || typeof item.content !== "string") continue;
+        const path = canonicalContextPath(root, item.file);
+        if (!path) {
+          scopeResolutionFailed = true;
+          notes.push(`Cannot resolve selected context ${item.file}; read relevant guidance directly.`);
+          continue;
+        }
+        selectedPaths.add(path);
+        const body = item.content + (item.truncated
+          ? `\n[Trellis: truncated — read ${item.file} directly for the rest]` : "");
+        specBlocks.push(budgetedBlock(
+          budget, item.file, item.file, body || `[Read on demand: ${item.file}]`,
+          str(item.reason) ?? "Work context", Buffer.byteLength(body, "utf-8"),
+        ));
+      }
+      for (const warning of Array.isArray(work.warnings) ? work.warnings : []) {
+        notes.push(String(warning));
+      }
+    } catch {
+      scopeResolutionFailed = true;
+      notes.push("Work context unreadable; run get_context.py --mode work directly.");
+    }
+  } else if (exists(join(root, ".trellis", "scripts", "get_context.py"))) {
+    scopeResolutionFailed = true;
+    notes.push("Work context unavailable; run get_context.py --mode work directly.");
+  }
+  if (!dir) {
+    appendNotes();
+    return [
+      "No active Trellis task found. Continue scoped work directly; a task is optional.",
+      ...specBlocks,
+    ].join("\n\n");
+  }
+  const relTaskDir = relative(root, dir).replace(/\\/g, "/");
+
+  // 1. Optional curated sources share the work context's total budget.
+  const jsonlName = TRELLIS_AGENT_JSONL[agent] ?? "";
+  if (jsonlName && !scopeResolutionFailed) {
     for (const entry of readJsonlEntries(dir, jsonlName)) {
       if (entry.type === "directory") continue;
+      const entryPath = canonicalContextPath(root, entry.file);
+      if (!entryPath) {
+        notes.push(`Cannot safely resolve manifest context ${entry.file}; not inlined.`);
+        continue;
+      }
+      if (selectedPaths.has(entryPath)) continue;
       const block = materializeFile(root, entry.file, entry.reason, limits, budget);
       if (block) specBlocks.push(block);
     }
   }
-  const spec = specBlocks.join("\n\n");
 
   // 2-4. Task artifacts, in order: prd.md -> design.md -> implement.md.
   const prd = materializeArtifact(
@@ -1250,6 +1326,9 @@ function buildContext(root: string, agent: string, key: string | null): string {
     limits,
     budget,
   );
+  // Advisories use only the budget left after rules, manifests and task artifacts.
+  appendNotes();
+  const spec = specBlocks.join("\n\n");
 
   // prd/design/impl already carry their own "=== path (label) ===" header
   // (from materializeArtifact) — no extra "### x.md" wrapper needed, that
@@ -1261,7 +1340,7 @@ function buildContext(root: string, agent: string, key: string | null): string {
     prd ?? `(missing) ${relTaskDir}/prd.md`,
     design ? "\n" + design : "",
     impl ? "\n" + impl : "",
-    spec ? "\n### Curated Spec / Research Context\n" + spec : "",
+    spec ? "\n### Scoped Work / Curated Context\n" + spec : "",
   ].join("\n");
 }
 
@@ -1812,7 +1891,7 @@ export default function trellisExtension(pi: {
     turnCache = {
       key: ck,
       ts: now,
-      wf: workflowBreadcrumb(r, k),
+      wf: [workflowBreadcrumb(r, k), workOverview(r, k)].filter(Boolean).join("\n\n"),
       ov: sessionOverview(r, k),
     };
     return turnCache;
@@ -2072,7 +2151,7 @@ export default function trellisExtension(pi: {
     const startup = getStartupCtx(k, turn, ctx);
     // Task context is snapshotted into systemPrompt once; later on-disk
     // changes are delivered as persisted messages so the prefix stays stable.
-    const freshTaskCtx = buildContext(root, "trellis-implement", k);
+    const freshTaskCtx = buildContext(root, "trellis-implement", k, true);
     let taskCtx = taskCtxSnapshot.get(key);
     if (taskCtx === undefined) {
       taskCtx = freshTaskCtx;

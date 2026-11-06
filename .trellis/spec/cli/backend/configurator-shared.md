@@ -78,11 +78,18 @@ These build the `Map<relPath, content>` that a `collect<Platform>Templates()` re
 
 ### Pull-based prelude (class-2 platforms)
 
-`configurators/shared.ts:SubAgentType` — `"implement" | "check"`. `research` is intentionally excluded — research doesn't depend on an active task; it traverses the spec tree.
+`configurators/shared.ts:SubAgentType` — `"implement" | "check"`. `research` is
+intentionally excluded from task discovery; its agent card loads scoped work
+context directly without requiring an active task.
 
 `configurators/shared.ts:buildPullBasedPrelude` — supplies a thin workflow
 reference and optional task-context discovery to pull-based agents. A complete
 assignment works without a task or JSONL; absent manifests never block work.
+The prelude points to the workflow's Work context section and
+`get_context.py --mode work` so workers read the selected spec bodies and linked
+research record. An index or hook overview does not replace those bodies.
+Work-type selection and record policy stay in workflow.md rather than being
+duplicated in the prelude.
 
 `configurators/shared.ts:detectSubAgentType` — returns `"implement"` / `"check"` / `null` from a filename like `trellis-implement.md`. Strips `.md`, `.toml`, `.prompt.md`. Returns `null` for `trellis-research` and unknown names — they skip the prelude.
 

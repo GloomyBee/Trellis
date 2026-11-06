@@ -3,6 +3,8 @@
 Use Phase 2.2 and Scientific verification in `.trellis/workflow.md`.
 Inspect the actual diff and affected callers. Choose checks that directly support
 the claim: execution, numerical correctness, or a scientific conclusion.
+Use Work context there to read the applicable spec bodies; consult the topic
+record's hypotheses and linked runs when assessing a scientific conclusion.
 Prefer existing focused checks. Do not create a test suite or default to a full
 lint/typecheck/test sweep. Explicit task/package requirements still apply.
 

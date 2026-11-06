@@ -24,7 +24,7 @@ from pathlib import Path
 from .active_task import resolve_context_key
 from .config import get_git_packages
 from .git import run_git
-from .packages_context import get_packages_section
+from .packages_context import get_packages_section, get_work_context, get_work_context_text
 from .tasks import iter_active_tasks, load_task, get_all_statuses, children_progress
 from .paths import (
     DIR_SCRIPTS,
@@ -558,6 +558,7 @@ def get_context_json(repo_root: Path | None = None) -> dict:
     if pkg_git_info:
         result["packageGit"] = pkg_git_info
 
+    result["workContext"] = get_work_context(repo_root, summary=True)
     return result
 
 
@@ -708,6 +709,9 @@ def get_context_text(repo_root: Path | None = None) -> str:
     if packages_text:
         lines.append(packages_text)
         lines.append("")
+
+    lines.append(get_work_context_text(repo_root, summary=True))
+    lines.append("")
 
     # Paths
     lines.append("## PATHS")

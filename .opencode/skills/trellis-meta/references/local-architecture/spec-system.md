@@ -1,8 +1,14 @@
 # Local Spec System
 
-`.trellis/spec/` is the user's project-specific engineering spec library. Trellis is not about making AI memorize conventions; it injects relevant specs or requires the AI to read them at the right time.
+`.trellis/spec/` holds reusable project conventions. Work context selects the
+relevant rules; startup indexes do not replace reading their bodies.
 
 ## Directory Model
+
+Projects may use a flat `index.md` plus substantive `code.md`, `research.md`,
+`experiments.md`, `plotting.md` or `writing.md`. These are supported names, not a
+required document set. Only create rules that have content. Package algorithm
+details and research histories remain in package docs. Layer layouts also work:
 
 A common single-repository structure:
 
@@ -39,7 +45,8 @@ A common monorepo structure:
     └── ...
 ```
 
-`index.md` is the entry point for each layer. It should list the Pre-Development Checklist and Quality Check. Specific guidelines live in other Markdown files in the same directory.
+`index.md` explains scope and routes readers to actual guidelines. It is not an
+extra checklist or evidence that all referenced bodies have already been read.
 
 ## Package Configuration
 
@@ -58,12 +65,19 @@ default_package: cli
 The AI can run:
 
 ```bash
-python3 ./.trellis/scripts/get_context.py --mode packages
+python ./.trellis/scripts/get_context.py --mode packages
 ```
 
-This command lists packages and spec layers for the current project. Use this output as the reference when configuring context JSONL.
+This command lists package/layer and flat-root entry points, not their bodies.
 
-## How Specs Enter Tasks
+## How Specs Enter Work
+
+The main agent explicitly chooses work types and package scope, then runs
+`get_context.py --mode work`. Arguments override optional task metadata; no task
+is required. Selected rule bodies, package README/docs index and a chosen
+research record's current state are loaded within the configured byte limits.
+`--summary` supplies navigation/current state only. Read history on demand and
+refresh selection when scope changes. See Work context in the workflow.
 
 Before a task enters implementation, planning may write relevant specs into `implement.jsonl` / `check.jsonl` when the task needs spec or research context beyond the task artifacts:
 
@@ -82,10 +96,12 @@ Specs should contain executable engineering conventions for the project, not gen
 - How error handling should be expressed.
 - Input/output contracts for APIs, hooks, and commands.
 - Patterns that are forbidden.
-- Cases that require tests.
+- Necessary verification for a specific implementation or scientific claim.
 - Project-specific pitfalls and how to avoid them.
 
-When the AI learns a new rule during implementation or debugging, it should update `.trellis/spec/` rather than only summarizing it in chat.
+Preserve useful reusable rules here. Scientific reasoning belongs in package
+topic docs, experimental evidence in runs, delivery status in the task PRD.
+No automatic spec update or session journal is required for each small edit.
 
 ## Local Customization Points
 
@@ -93,8 +109,8 @@ When the AI learns a new rule during implementation or debugging, it should upda
 | --- | --- |
 | Add a new spec layer | `.trellis/spec/<package>/<layer>/index.md` and corresponding guideline files. |
 | Change monorepo spec mapping | `packages` / `default_package` / `spec_scope` in `.trellis/config.yaml`. |
-| Change which specs AI reads before implementation | The task's `implement.jsonl`. |
-| Change which specs AI reads during checking | The task's `check.jsonl`. |
+| Select work context | `--mode work` arguments or task `meta.work_types`, `package_path`, `research_record`. |
+| Add curated worker references | Optional `implement.jsonl` / `check.jsonl`, or direct scoped reads. |
 | Change when specs should be updated | Phase 3.3 in `.trellis/workflow.md` and the `trellis-update-spec` skill. |
 
 ## Boundaries

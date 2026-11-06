@@ -1,4 +1,4 @@
-/* global process */
+/* global process, Buffer */
 /**
  * Trellis Context Injection Plugin
  *
@@ -6,19 +6,118 @@
  * Uses OpenCode's tool.execute.before hook.
  */
 
-import { existsSync, readdirSync } from "fs"
-import { join } from "path"
+import { existsSync, readdirSync, realpathSync, statSync } from "fs"
+import { isAbsolute, join, relative } from "path"
 import {
   TrellisContext,
   debugLog,
   readContextInjectionLimits,
   ContextBudget,
   materializeArtifact,
+  materializeFile,
 } from "../lib/trellis-context.js"
+import { loadWorkContext } from "../lib/session-utils.js"
 
 // Supported subagent types
 const AGENTS_ALL = ["implement", "check", "research"]
-const AGENTS_REQUIRE_TASK = ["implement", "check"]
+
+function canonicalContextPath(ctx, file) {
+  try {
+    const root = realpathSync(ctx.directory)
+    const target = realpathSync(isAbsolute(file) ? file : join(ctx.directory, file))
+    const rel = relative(root, target)
+    if (rel.startsWith("..") || isAbsolute(rel)) return null
+    const path = target.replace(/\\/g, "/").replace(/\/$/, "")
+    return process.platform === "win32" ? path.toLowerCase() : path
+  } catch {
+    return null
+  }
+}
+
+function withWorkNotes(parts, notes, budget) {
+  for (const note of notes) {
+    const notice = `[Trellis: ${note}]`
+    const size = Buffer.byteLength(notice, "utf-8")
+    if (budget.hasRoom(size)) {
+      budget.add(size)
+      parts.push(notice)
+    }
+  }
+  return parts.join("\n\n")
+}
+
+function scopedWorkBlocks(ctx, taskDir, budget) {
+  const context = loadWorkContext(ctx, null, { summary: false, taskDir: taskDir || "" })
+  const parts = []
+  const paths = new Set()
+  const notes = [...(context?.warnings || [])]
+  for (const entry of context?.files || []) {
+    if (typeof entry.file !== "string" || typeof entry.content !== "string") continue
+    const path = canonicalContextPath(ctx, entry.file)
+    if (!path) {
+      paths.add(null)
+      notes.push(`Cannot resolve selected context ${entry.file}; read relevant guidance directly.`)
+      continue
+    }
+    paths.add(path)
+    const content = entry.content + (entry.truncated
+      ? `\n[Trellis: truncated — read ${entry.file} directly for the rest]` : "")
+    const block = `=== ${entry.file} ===\n${content}`
+    const size = Buffer.byteLength(block, "utf-8")
+    const output = budget.hasRoom(size) ? block
+      : `[Trellis: not inlined (total context limit reached) — ${entry.file}: ${entry.reason || "Work context"}]`
+    budget.add(Buffer.byteLength(output, "utf-8"))
+    parts.push(output)
+  }
+  return { parts, paths, notes }
+}
+
+// Do not re-inline selected files (especially research history) through JSONL.
+function curatedBlocks(ctx, jsonlPath, limits, budget, selectedPaths, notes) {
+  const blocks = []
+  if (selectedPaths.has(null)) {
+    notes.push("Selected context could not be resolved; read manifest references directly.")
+    return blocks
+  }
+  for (const line of (ctx.readFile(jsonlPath) || "").split(/\r?\n/)) {
+    if (!line.trim()) continue
+    try {
+      const entry = JSON.parse(line)
+      const file = entry.file || entry.path
+      if (typeof file !== "string" || !file) continue
+      const normalized = canonicalContextPath(ctx, file)
+      if (!normalized) {
+        notes.push(`Cannot safely resolve manifest context ${file}; not inlined.`)
+        continue
+      }
+      if (selectedPaths.has(normalized)) continue
+      const reason = entry.reason || "-"
+      if (entry.type === "directory") {
+        if ([...selectedPaths].some(path => path.startsWith(`${normalized}/`))) {
+          notes.push(`Read ${file} directly for additional context; selected files are already scoped above.`)
+        } else {
+          const directory = isAbsolute(file) ? file : join(ctx.directory, file)
+          const files = readdirSync(directory)
+            .filter(name => name.endsWith(".md") && statSync(join(directory, name)).isFile())
+            .sort().slice(0, 20)
+          for (const name of files) {
+            const child = join(file, name)
+            const childPath = canonicalContextPath(ctx, child)
+            if (!childPath || selectedPaths.has(childPath)) continue
+            const block = materializeFile(ctx.directory, child, reason, limits, budget)
+            if (block) blocks.push(block)
+          }
+        }
+      } else {
+        const block = materializeFile(ctx.directory, file, reason, limits, budget)
+        if (block) blocks.push(block)
+      }
+    } catch {
+      // Ignore malformed optional manifest entries.
+    }
+  }
+  return blocks
+}
 
 // Match `Active task: <path>` on the first non-empty line of the dispatch
 // prompt. Mirrors the contract in workflow.md's [workflow-state:in_progress]
@@ -36,24 +135,23 @@ function extractActiveTaskHint(prompt) {
  * (`.trellis/tasks/foo`) or absolute; both are resolved via
  * `ctx.resolveTaskDir`.
  *
- * Read order (mirrors Python `get_implement_context`):
- *   1. All files in implement.jsonl (spec/research manifests)
+ * Read order:
+ *   1. Scoped work sources, then optional non-duplicate JSONL references
  *   2. prd.md (requirements)
  *   3. design.md if present (technical design)
  *   4. implement.md if present (execution plan)
  * All blocks share one total budget (issue #441).
  */
 function getImplementContext(ctx, taskDir) {
-  const parts = []
-  const taskDirFull = ctx.resolveTaskDir(taskDir)
-  if (!taskDirFull) return ""
-
   const limits = readContextInjectionLimits(ctx.directory)
   const budget = new ContextBudget(limits.max_total_bytes)
+  const { parts, paths, notes } = scopedWorkBlocks(ctx, taskDir, budget)
+  const taskDirFull = taskDir ? ctx.resolveTaskDir(taskDir) : null
+  if (!taskDirFull) return withWorkNotes(parts, notes, budget)
 
   // 1. Read implement.jsonl
   const jsonlPath = join(taskDirFull, "implement.jsonl")
-  const blocks = ctx.readJsonlWithFiles(jsonlPath, limits, budget)
+  const blocks = curatedBlocks(ctx, jsonlPath, limits, budget, paths, notes)
   if (blocks.length > 0) {
     parts.push(ctx.buildContextFromEntries(blocks))
   }
@@ -91,7 +189,7 @@ function getImplementContext(ctx, taskDir) {
   )
   if (implementPlanBlock) parts.push(implementPlanBlock)
 
-  return parts.join("\n\n")
+  return withWorkNotes(parts, notes, budget)
 }
 
 /**
@@ -99,15 +197,14 @@ function getImplementContext(ctx, taskDir) {
  * Same read order and shared budget as the implement context.
  */
 function getCheckContext(ctx, taskDir) {
-  const parts = []
-  const taskDirFull = ctx.resolveTaskDir(taskDir)
-  if (!taskDirFull) return ""
-
   const limits = readContextInjectionLimits(ctx.directory)
   const budget = new ContextBudget(limits.max_total_bytes)
+  const { parts, paths, notes } = scopedWorkBlocks(ctx, taskDir, budget)
+  const taskDirFull = taskDir ? ctx.resolveTaskDir(taskDir) : null
+  if (!taskDirFull) return withWorkNotes(parts, notes, budget)
 
   const jsonlPath = join(taskDirFull, "check.jsonl")
-  const blocks = ctx.readJsonlWithFiles(jsonlPath, limits, budget)
+  const blocks = curatedBlocks(ctx, jsonlPath, limits, budget, paths, notes)
   if (blocks.length > 0) {
     parts.push(ctx.buildContextFromEntries(blocks))
   }
@@ -142,7 +239,7 @@ function getCheckContext(ctx, taskDir) {
   )
   if (implementPlanBlock) parts.push(implementPlanBlock)
 
-  return parts.join("\n\n")
+  return withWorkNotes(parts, notes, budget)
 }
 
 /**
@@ -157,194 +254,38 @@ function getFinishContext(ctx, taskDir) {
 /**
  * Get context for research agent
  */
-function getResearchContext(ctx) {
-  const parts = []
-
-  // Dynamic project structure (scan actual spec directory)
-  const specPath = ".trellis/spec"
-  const specFull = join(ctx.directory, specPath)
-
-  const structureLines = [`## Project Spec Directory Structure\n\n\`\`\`\n${specPath}/`]
-  if (existsSync(specFull)) {
-    try {
-      const entries = readdirSync(specFull, { withFileTypes: true })
-        .filter(d => d.isDirectory() && !d.name.startsWith("."))
-        .sort((a, b) => a.name.localeCompare(b.name))
-
-      for (const entry of entries) {
-        const entryPath = join(specFull, entry.name)
-        if (existsSync(join(entryPath, "index.md"))) {
-          structureLines.push(`├── ${entry.name}/`)
-        } else {
-          try {
-            const nested = readdirSync(entryPath, { withFileTypes: true })
-              .filter(d => d.isDirectory() && existsSync(join(entryPath, d.name, "index.md")))
-              .sort((a, b) => a.name.localeCompare(b.name))
-            if (nested.length > 0) {
-              structureLines.push(`├── ${entry.name}/`)
-              for (const n of nested) {
-                structureLines.push(`│   ├── ${n.name}/`)
-              }
-            }
-          } catch {
-            // Ignore nested read errors
-          }
-        }
-      }
-    } catch {
-      // Ignore read errors
-    }
-  }
-  structureLines.push("```")
-
-  parts.push(structureLines.join("\n") + `
-
-## Search Tips
-
-- Spec files: \`.trellis/spec/**/*.md\`
-- Known issues: \`.trellis/big-question/\`
-- Code search: Use Glob and Grep tools
-- Tech solutions: Use mcp__exa__web_search_exa or mcp__exa__get_code_context_exa`)
-
-  return parts.join("\n\n")
+function getResearchContext(ctx, taskDir) {
+  const limits = readContextInjectionLimits(ctx.directory)
+  const budget = new ContextBudget(limits.max_total_bytes)
+  const { parts, notes } = scopedWorkBlocks(ctx, taskDir, budget)
+  parts.push("Read .trellis/workflow.md and relevant scoped specs/package docs. Search only what the assigned question needs.")
+  return withWorkNotes(parts, notes, budget)
 }
 
 /**
  * Build enhanced prompt with context
  */
 function buildPrompt(agentType, originalPrompt, context, isFinish = false) {
-  const templates = {
-    implement: `<!-- trellis-hook-injected -->
-# Implement Agent Task
+  const names = { implement: "Implement", check: isFinish ? "Finish" : "Check", research: "Research" }
+  if (!names[agentType]) return originalPrompt
+  return `<!-- trellis-hook-injected -->
+# ${names[agentType]} Agent Task
 
-You are the Implement Agent in the Multi-Agent Pipeline.
-
-## Your Context
-
-${context}
-
----
-
-## Your Task
-
-${originalPrompt}
-
----
-
-## Workflow
-
-1. **Understand specs** - All dev specs are injected above
-2. **Understand task artifacts** - Read requirements, technical design if present, and execution plan if present
-3. **Implement feature** - Follow specs and task artifacts
-4. **Self-check** - Ensure code quality
-
-## Important Constraints
-
-- Do NOT execute git commit
-- Follow all dev specs injected above
-- Report list of modified/created files when done`,
-
-    check: isFinish ? `<!-- trellis-hook-injected -->
-# Finish Agent Task
-
-You are performing the final check before creating a PR.
+Follow .trellis/workflow.md and the scoped assignment below. There is no fixed
+agent pipeline. Read relevant guidance bodies, not just indexes; follow paths
+shown as truncated or not inlined when that content matters to the assignment.
+${agentType === "research" ? "Research is read-only unless the assignment explicitly grants an output path." : "Use only the verification needed for the changed behavior or scientific claim."}
+Do not create Git commits, PRs or new records unless the assignment requests them.
 
 ## Your Context
 
 ${context}
 
----
-
 ## Your Task
 
 ${originalPrompt}
 
----
-
-## Workflow
-
-1. **Review changes** - Run \`git diff --name-only\` to see all changed files
-2. **Verify task artifacts** - Check prd.md and, when present, design.md / implement.md
-3. **Spec sync** - Analyze whether changes introduce new patterns, contracts, or conventions
-   - If new pattern/convention found: read target spec file → update it → update index.md if needed
-   - If infra/cross-layer change: follow the 7-section mandatory template from update-spec.md
-   - If pure code fix with no new patterns: skip this step
-4. **Run final checks** - Execute lint and typecheck
-5. **Confirm ready** - Ensure code is ready for PR
-
-## Important Constraints
-
-- You MAY update spec files when gaps are detected (use update-spec.md as guide)
-- MUST read the target spec file BEFORE editing (avoid duplicating existing content)
-- Do NOT update specs for trivial changes (typos, formatting, obvious fixes)
-- If critical CODE issues found, report them clearly (fix specs, not code)
-- Verify all acceptance criteria in prd.md are met
-- Verify design.md and implement.md constraints when those files are present` :
-      `<!-- trellis-hook-injected -->
-# Check Agent Task
-
-You are the Check Agent in the Multi-Agent Pipeline.
-
-## Your Context
-
-${context}
-
----
-
-## Your Task
-
-${originalPrompt}
-
----
-
-## Workflow
-
-1. **Get changes** - Run \`git diff --name-only\` and \`git diff\`
-2. **Check against specs** - Check item by item
-3. **Self-fix** - Fix issues directly, don't just report
-4. **Run verification** - Run lint and typecheck
-
-## Important Constraints
-
-- Fix issues yourself, don't just report
-- Must execute complete checklist`,
-
-    research: `<!-- trellis-hook-injected -->
-# Research Agent Task
-
-You are the Research Agent in the Multi-Agent Pipeline.
-
-## Core Principle
-
-**You do one thing: find and explain information.**
-
-## Project Info
-
-${context}
-
----
-
-## Your Task
-
-${originalPrompt}
-
----
-
-## Workflow
-
-1. **Understand query** - Determine search type and scope
-2. **Plan search** - List search steps
-3. **Execute search** - Run multiple searches in parallel
-4. **Organize results** - Output structured report
-
-## Strict Boundaries
-
-**Only allowed**: Describe what exists, where it is, how it works
-
-**Forbidden**: Suggest improvements, criticize implementation, modify files`
-  }
-
-  return templates[agentType] || originalPrompt
+Report findings or changes, actual checks/results and any unresolved issue.`
 }
 
 function shellQuote(value) {
@@ -515,13 +456,8 @@ export default async ({ directory, platform: hostPlatform = process.platform, en
             }
           }
 
-          // Agents requiring task directory
-          if (AGENTS_REQUIRE_TASK.includes(subagentType)) {
-            // subagentType is already stripped of "trellis-" prefix above
-            if (!taskDir) {
-              debugLog("inject", "Skipping - no current task")
-              return
-            }
+          // A task is optional; still reject an explicit stale/unsafe task path.
+          if (taskDir) {
             const taskDirFull = ctx.resolveTaskDir(taskDir)
             if (!taskDirFull || !existsSync(taskDirFull)) {
               debugLog("inject", "Skipping - task directory not found")

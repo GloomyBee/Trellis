@@ -5632,7 +5632,7 @@ print(json.dumps({
     const context = parsed.hookSpecificOutput.additionalContext;
 
     expect(context).toContain("Active task: .trellis/tasks/issue-106");
-    expect(context).toContain("Project Spec Directory Structure");
+    expect(context).toContain("--work-type");
     expect(context).not.toContain("TOKEN_IMPLEMENT_PRIVATE");
     expect(context).not.toContain("TOKEN_CHECK_PRIVATE");
     expect(context).not.toContain("implement.jsonl");
@@ -5665,7 +5665,16 @@ print(json.dumps({
           cwd: tmpDir,
         }),
       );
-      expect(output.trim()).toBe("");
+      if (sessionId === "missing-parent") {
+        const parsed = JSON.parse(output) as {
+          hookSpecificOutput: { additionalContext: string };
+        };
+        const context = parsed.hookSpecificOutput.additionalContext;
+        expect(context).toContain("Active task: (none; a task is optional)");
+        expect(context).not.toContain(".trellis/tasks/issue-106");
+      } else {
+        expect(output.trim()).toBe("");
+      }
     }
   });
 

@@ -1,0 +1,29 @@
+{
+  "id": "research-context",
+  "name": "research-context",
+  "title": "Scoped scientific specs and research context",
+  "description": "Support flat project specs, bounded work-type context and durable package research records, then apply to the research workspace.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": "cli",
+  "priority": "P2",
+  "creator": "GloomyBee",
+  "assignee": "GloomyBee",
+  "createdAt": "2026-11-06",
+  "completedAt": "2026-11-06",
+  "branch": "research-light",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "work_types": "code,writing",
+    "package_path": "packages/cli"
+  }
+}

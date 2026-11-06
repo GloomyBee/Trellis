@@ -1,14 +1,15 @@
 ---
 name: trellis-update-spec
-description: "Captures executable contracts and coding conventions into .trellis/spec/ documents. Use when learning something valuable from debugging, implementing, or discussion that should be preserved for future sessions."
+description: "Preserve a reusable project convention or substantive research finding in its owning spec or package topic record. Use when a finding will help future work."
 ---
 
 # Update Useful Project Knowledge
 
 Follow Phase 3.3 in `.trellis/workflow.md`. Update an existing relevant spec only
-when a reusable convention or contract needs to survive. Keep mathematical and
-algorithm-specific knowledge in the owning package's docs; task progress stays
-in its PRD. Link instead of copying.
+when a reusable convention or contract needs to survive. Follow Records and
+evidence there for lasting research: update the owning package's topic record
+after substantive progress, preserving rejected judgments and counterevidence.
+Keep delivery scope/status in the PRD and link the record instead of copying it.
 
 Include only concrete information needed by future work (for example a signature,
 a numerical assumption or a boundary behavior). No required section count,

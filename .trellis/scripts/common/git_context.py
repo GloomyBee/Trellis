@@ -26,6 +26,8 @@ from .session_context import (
 from .packages_context import (
     get_context_packages_text,
     get_context_packages_json,
+    get_work_context,
+    get_work_context_text,
 )
 from .trellis_config import read_trellis_config
 from .workflow_phase import (
@@ -57,9 +59,9 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         "-m",
-        choices=["default", "record", "packages", "phase"],
+        choices=["default", "record", "packages", "phase", "work"],
         default="default",
-        help="Output mode: default (full context), record (for record-session), packages (package info only), phase (workflow step extraction)",
+        help="Output mode: default, record, packages, phase, or work (scoped work context)",
     )
     parser.add_argument(
         "--step",
@@ -69,6 +71,14 @@ def main() -> None:
         "--platform",
         help="Platform name for --mode phase, e.g. cursor, claude-code. Filters platform-tagged blocks.",
     )
+    parser.add_argument(
+        "--work-type", action="append", default=None,
+        help="Work types for --mode work: code,research,experiments,plotting,writing; repeat or separate with commas.",
+    )
+    parser.add_argument("--package-path", help="Repository-relative package directory for --mode work.")
+    parser.add_argument("--research-record", help="Repository-relative research Markdown record for --mode work.")
+    parser.add_argument("--task", help="Task directory supplying optional work context metadata.")
+    parser.add_argument("--summary", action="store_true", help="Show a short work index and current research state.")
 
     args = parser.parse_args()
 
@@ -82,6 +92,18 @@ def main() -> None:
             print(json.dumps(get_context_packages_json(), indent=2, ensure_ascii=False))
         else:
             print(get_context_packages_text())
+    elif args.mode == "work":
+        kwargs = {
+            "work_types": args.work_type,
+            "package_path": args.package_path,
+            "research_record": args.research_record,
+            "task_dir": args.task,
+            "summary": args.summary,
+        }
+        if args.json:
+            print(json.dumps(get_work_context(**kwargs), indent=2, ensure_ascii=False))
+        else:
+            print(get_work_context_text(**kwargs))
     elif args.mode == "phase":
         content = get_step(args.step) if args.step else get_phase_index()
         if not content.strip():

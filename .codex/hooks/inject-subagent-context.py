@@ -7,7 +7,7 @@ Injects task-specific context when sub-agents (implement, check, research) are s
 
 Core Design Philosophy:
 - Hook is responsible for injecting all context, subagent works autonomously with complete info
-- Each agent has a dedicated jsonl file defining its context
+- Scoped work guidance is loaded first; dedicated JSONL context is optional
 - No resume needed, no segmentation, behavior controlled by code not prompt
 
 Trigger: PreToolUse (before Task tool call)
@@ -238,6 +238,7 @@ class _Budget:
     def __init__(self, max_total_bytes: int) -> None:
         self.max_total_bytes = max_total_bytes
         self.used = 0
+        self.work_notes: list[str] = []
 
     def has_room(self, size: int) -> bool:
         if self.max_total_bytes <= 0:
@@ -367,6 +368,7 @@ def _materialize_directory(
     limits: dict[str, int],
     budget: _Budget,
     max_files: int = 20,
+    scoped_paths: set[str] | None = None,
 ) -> list[str]:
     """Read all .md files in a directory, applying the same per-file and
     total caps as a single-file JSONL entry."""
@@ -383,6 +385,9 @@ def _materialize_directory(
         )
         for filename in md_files[:max_files]:
             relative_path = os.path.join(dir_path, filename)
+            resolved = os.path.normcase(os.path.realpath(os.path.join(base_path, relative_path)))
+            if resolved in (scoped_paths or set()):
+                continue
             block = _materialize_file(base_path, relative_path, reason, limits, budget)
             if block:
                 blocks.append(block)
@@ -401,25 +406,17 @@ def read_jsonl_entries(base_path: str, jsonl_path: str) -> list[dict]:
         {"file": "path/to/dir/", "type": "directory", "reason": "..."}
         {"_example": "..."}          # legacy placeholder — skipped (no `file` field)
 
-    Rows without a ``file`` field (e.g. the placeholder line older Trellis
-    versions wrote at ``task.py create`` time) are skipped silently. If the
-    resulting entry list is empty, a stderr warning is emitted so the operator
-    can debug missing context.
+    Rows without a ``file`` field (e.g. legacy placeholders) are skipped.
+    An absent or empty manifest is normal for lightweight tasks.
 
     Returns:
         [{"file": path, "type": "file" | "directory", "reason": reason}, ...]
     """
     full_path = os.path.join(base_path, jsonl_path)
     if not os.path.exists(full_path):
-        print(
-            f"[inject-subagent-context] WARN: {jsonl_path} not found — "
-            f"sub-agent will receive only task artifacts",
-            file=sys.stderr,
-        )
         return []
 
     entries: list[dict] = []
-    saw_real_entry = False
     try:
         with open(full_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -434,7 +431,6 @@ def read_jsonl_entries(base_path: str, jsonl_path: str) -> list[dict]:
                         # Seed / comment row — skip silently
                         continue
 
-                    saw_real_entry = True
                     entries.append(
                         {
                             "file": file_path,
@@ -447,28 +443,27 @@ def read_jsonl_entries(base_path: str, jsonl_path: str) -> list[dict]:
     except Exception:
         pass
 
-    if not saw_real_entry:
-        print(
-            f"[inject-subagent-context] WARN: {jsonl_path} has no curated "
-            f"entries (only seed / empty) — sub-agent will receive only "
-            f"task artifacts. See workflow.md planning artifact guidance.",
-            file=sys.stderr,
-        )
-
     return entries
 
 
 def _materialize_jsonl_entries(
-    base_path: str, jsonl_path: str, limits: dict[str, int], budget: _Budget
+    base_path: str, jsonl_path: str, limits: dict[str, int], budget: _Budget,
+    scoped_paths: set[str] | None = None,
 ) -> list[str]:
     """Materialize every entry in a jsonl context file into context blocks,
     applying per-file and total budget caps."""
     blocks: list[str] = []
     for entry in read_jsonl_entries(base_path, jsonl_path):
+        resolved = os.path.normcase(os.path.realpath(os.path.join(base_path, entry["file"])))
+        if resolved in (scoped_paths or set()):
+            # Do not re-expand a research record whose current-state excerpt
+            # was already selected by the shared runtime.
+            continue
         if entry["type"] == "directory":
             blocks.extend(
                 _materialize_directory(
-                    base_path, entry["file"], entry["reason"], limits, budget
+                    base_path, entry["file"], entry["reason"], limits, budget,
+                    scoped_paths=scoped_paths,
                 )
             )
         else:
@@ -487,24 +482,59 @@ def get_agent_context(
     limits: dict[str, int],
     budget: _Budget,
 ) -> str:
-    """
-    Get context from {agent_type}.jsonl for the specified agent.
-    Only reads implement.jsonl or check.jsonl (the two JSONL files the task system creates).
-    """
-    agent_jsonl = f"{task_dir}/{agent_type}.jsonl"
-    blocks = _materialize_jsonl_entries(repo_root, agent_jsonl, limits, budget)
-    if not blocks:
-        # Zero curated context reaches the model silently otherwise — the
-        # stderr WARN above never enters any session (#573). Put the fact in
-        # the prompt itself so the sub-agent compensates instead of assuming
-        # the spec context was complete.
-        return (
-            f"[Trellis] {agent_jsonl} has no curated entries, so no spec/research "
-            "context was injected. Before working, read the guidelines relevant "
-            "to the code you will touch under .trellis/spec/, and treat the task "
-            "artifacts below as the only prepared context."
+    """Load scoped guidance and an optional manifest under the same budget."""
+    scripts_dir = Path(repo_root) / DIR_WORKFLOW / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    blocks: list[str] = []
+    scoped_paths: set[str] = set()
+    try:
+        from common.packages_context import get_work_context
+
+        context = get_work_context(Path(repo_root), task_dir=task_dir or "")
+        for entry in context["files"]:
+            file_path = entry["file"]
+            scoped_paths.add(os.path.normcase(os.path.realpath(os.path.join(repo_root, file_path))))
+            # Reuse the already bounded body, especially the research-state
+            # excerpt. Reading its path again would inject the full history.
+            content = entry["content"]
+            if entry["truncated"]:
+                content += f"\n[Trellis: truncated — read {file_path} directly for the rest]"
+            blocks.append(_budgeted_block(
+                budget, file_path, file_path, content, entry["reason"],
+                len(content.encode("utf-8")),
+            ))
+        notes = list(context["warnings"])
+        if not task_dir:
+            notes.append(
+                "No task is required. Select relevant context with get_context.py "
+                "--mode work --work-type <types> --package-path <path>; read rule "
+                "bodies before work and refresh when scope changes."
+            )
+        if notes:
+            # Advisories must not displace a selected rule, manifest or PRD.
+            budget.work_notes.extend(notes)
+    except Exception as exc:
+        budget.work_notes.append(
+            f"Work context unavailable: {exc}; read relevant guidance directly."
         )
+    if task_dir:
+        agent_jsonl = f"{task_dir}/{agent_type}.jsonl"
+        blocks.extend(_materialize_jsonl_entries(
+            repo_root, agent_jsonl, limits, budget, scoped_paths
+        ))
     return "\n\n".join(blocks)
+
+
+def _with_work_notes(parts: list[str], budget: _Budget) -> str:
+    if budget.work_notes:
+        notes = "\n".join(f"[Trellis] {item}" for item in budget.work_notes)
+        parts.append(_budgeted_block(
+            budget, "Work context notes", ".trellis/spec/index.md", notes,
+            "Select relevant work types/package; read omitted guidance directly; no task is required.",
+            len(notes.encode("utf-8")),
+        ))
+    return "\n\n".join(parts)
 
 
 def _materialize_artifact(
@@ -536,7 +566,7 @@ def get_implement_context(repo_root: str, task_dir: str) -> str:
     Complete context for Implement Agent
 
     Read order:
-    1. All files in implement.jsonl (spec/research manifests)
+    1. Selected work guidance plus optional implement.jsonl references
     2. prd.md (requirements)
     3. design.md if present (technical design)
     4. implement.md if present (execution plan)
@@ -545,10 +575,13 @@ def get_implement_context(repo_root: str, task_dir: str) -> str:
     budget = _Budget(limits["max_total_bytes"])
     context_parts = []
 
-    # 1. Read implement.jsonl
+    # 1. Selected guidance and optional manifest
     base_context = get_agent_context(repo_root, task_dir, "implement", limits, budget)
     if base_context:
         context_parts.append(base_context)
+
+    if not task_dir:
+        return _with_work_notes(context_parts, budget)
 
     # 2. Requirements document
     prd_block = _materialize_artifact(
@@ -586,12 +619,12 @@ def get_implement_context(repo_root: str, task_dir: str) -> str:
     if implement_plan_block:
         context_parts.append(implement_plan_block)
 
-    return "\n\n".join(context_parts)
+    return _with_work_notes(context_parts, budget)
 
 
 def get_check_context(repo_root: str, task_dir: str) -> str:
     """
-    Context for Check Agent: check.jsonl + task artifacts.
+    Context for Check Agent: scoped guidance, optional check.jsonl and task artifacts.
     """
     limits = _get_limits(repo_root)
     budget = _Budget(limits["max_total_bytes"])
@@ -600,6 +633,9 @@ def get_check_context(repo_root: str, task_dir: str) -> str:
     base_context = get_agent_context(repo_root, task_dir, "check", limits, budget)
     if base_context:
         context_parts.append(base_context)
+
+    if not task_dir:
+        return _with_work_notes(context_parts, budget)
 
     prd_block = _materialize_artifact(
         repo_root,
@@ -634,7 +670,7 @@ def get_check_context(repo_root: str, task_dir: str) -> str:
     if implement_plan_block:
         context_parts.append(implement_plan_block)
 
-    return "\n\n".join(context_parts)
+    return _with_work_notes(context_parts, budget)
 
 
 def get_finish_context(repo_root: str, task_dir: str) -> str:
@@ -704,49 +740,11 @@ extra tests, reports, journals or Git operations by default.
 
 
 def get_research_context(repo_root: str, task_dir: str | None) -> str:
-    """
-    Context for Research Agent — project structure overview for spec directories.
-
-    `task_dir` kept for signature parity with get_implement_context / get_check_context
-    so the dispatcher can call them uniformly.
-    """
-    _ = task_dir
-    context_parts = []
-
-    # 1. Project structure overview (dynamically discover spec directories)
-    spec_path = f"{DIR_WORKFLOW}/{DIR_SPEC}"
-    spec_root = Path(repo_root) / DIR_WORKFLOW / DIR_SPEC
-
-    # Build spec tree dynamically
-    tree_lines = [f"{spec_path}/"]
-    if spec_root.is_dir():
-        pkg_dirs = sorted(d for d in spec_root.iterdir() if d.is_dir())
-        for i, pkg_dir in enumerate(pkg_dirs):
-            is_last = i == len(pkg_dirs) - 1
-            prefix = "└── " if is_last else "├── "
-            layers = sorted(d.name for d in pkg_dir.iterdir() if d.is_dir())
-            layer_info = f" ({', '.join(layers)})" if layers else ""
-            tree_lines.append(f"{prefix}{pkg_dir.name}/{layer_info}")
-
-    spec_tree = "\n".join(tree_lines)
-
-    project_structure = f"""## Project Spec Directory Structure
-
-```
-{spec_tree}
-```
-
-To get structured package info, run: `python ./{DIR_WORKFLOW}/scripts/get_context.py --mode packages`
-
-## Search Tips
-
-- Spec files: `{spec_path}/**/*.md`
-- Code search: Use Glob and Grep tools
-- Tech solutions: Use mcp__exa__web_search_exa or mcp__exa__get_code_context_exa"""
-
-    context_parts.append(project_structure)
-
-    return "\n\n".join(context_parts)
+    """Load the same selected guidance/current research state for research work."""
+    limits = _get_limits(repo_root)
+    budget = _Budget(limits["max_total_bytes"])
+    context = get_agent_context(repo_root, task_dir or "", "research", limits, budget)
+    return _with_work_notes([context] if context else [], budget)
 
 
 def build_research_prompt(original_prompt: str, context: str) -> str:
@@ -806,7 +804,7 @@ You are the dispatched `{subagent_type}` role for this task. Perform that role
 directly; do not follow main-session dispatch or wait instructions, and do not
 spawn another Trellis subagent.
 
-Active task: {task_dir}
+Active task: {task_dir or '(none; a task is optional)'}
 
 ## Curated Context
 
@@ -845,18 +843,15 @@ def _handle_codex_subagent_start(input_data: dict) -> None:
         allow_environment_context=False,
         require_existing=True,
     )
-    if not task_dir:
-        return
-
-    if subagent_type in AGENTS_REQUIRE_TASK:
+    if task_dir and subagent_type in AGENTS_REQUIRE_TASK:
         task_dir_full = Path(repo_root) / task_dir
         if not task_dir_full.is_dir():
             return
 
     if subagent_type == AGENT_IMPLEMENT:
-        context = get_implement_context(repo_root, task_dir)
+        context = get_implement_context(repo_root, task_dir or "")
     elif subagent_type == AGENT_CHECK:
-        context = get_check_context(repo_root, task_dir)
+        context = get_check_context(repo_root, task_dir or "")
     else:
         context = get_research_context(repo_root, task_dir)
 
@@ -867,7 +862,7 @@ def _handle_codex_subagent_start(input_data: dict) -> None:
         "hookSpecificOutput": {
             "hookEventName": "SubagentStart",
             "additionalContext": build_codex_subagent_context(
-                subagent_type, task_dir, context
+                subagent_type, task_dir or "", context
             ),
         }
     }
@@ -1031,10 +1026,8 @@ def main():
         allow_single_session_fallback=True,
     )
 
-    # implement/check need task directory
-    if subagent_type in AGENTS_REQUIRE_TASK:
-        if not task_dir:
-            sys.exit(0)
+    # Existing task pointers must be safe; absence is valid for small work.
+    if task_dir and subagent_type in AGENTS_REQUIRE_TASK:
         # Contain the pointer before reading anything through it. `task.py` now
         # refuses to store a ref that leaves the repo, but a session file
         # written before that fix can still hold one, and `trellis update`
@@ -1061,18 +1054,16 @@ def main():
 
     # Get context and build prompt based on subagent type
     if subagent_type == AGENT_IMPLEMENT:
-        assert task_dir is not None  # validated above
-        context = get_implement_context(repo_root, task_dir)
+        context = get_implement_context(repo_root, task_dir or "")
         new_prompt = build_implement_prompt(original_prompt, context)
     elif subagent_type == AGENT_CHECK:
-        assert task_dir is not None  # validated above
         if is_finish_phase:
             # Finish phase: use finish context (lighter, focused on final verification)
-            context = get_finish_context(repo_root, task_dir)
+            context = get_finish_context(repo_root, task_dir or "")
             new_prompt = build_finish_prompt(original_prompt, context)
         else:
             # Regular check phase: use check context (full specs for self-fix loop)
-            context = get_check_context(repo_root, task_dir)
+            context = get_check_context(repo_root, task_dir or "")
             new_prompt = build_check_prompt(original_prompt, context)
     elif subagent_type == AGENT_RESEARCH:
         # Research can work without task directory

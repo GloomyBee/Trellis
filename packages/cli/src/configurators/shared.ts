@@ -238,21 +238,21 @@ export function resolvePlaceholdersNeutral(
 /** Skill description registry — maps template name to auto-trigger description. */
 const SKILL_DESCRIPTIONS: Record<string, string> = {
   start:
-    "Initializes an AI development session by reading workflow guides, developer identity, git status, active tasks, and project guidelines from .trellis/. Classifies incoming tasks and routes to brainstorm, direct edit, or task workflow. Use when beginning a new coding session, resuming work, starting a new task, or re-establishing project context.",
+    "Load session state and the relevant package and work-type specs, then follow .trellis/workflow.md. Use when beginning a task or re-establishing project context.",
   continue:
-    "Resume work on the current task. Loads the workflow Phase Index, figures out which phase/step to pick up at, then pulls the step-level detail via get_context.py --mode phase. Use when coming back to an in-progress task and you need to know what to do next.",
+    "Resume a tracked task with its selected work-type specs, package context and linked research record, then follow the current workflow step. Use when returning to an in-progress task.",
   "finish-work":
-    "Close completed work with proportionate verification, update its PRD and archive without automatic Git writes or journals. Use when finishing an implementation task.",
+    "Close completed work with proportionate verification and delivery status; preserve substantive research progress in the linked package record. Use when finishing a task or local change.",
   "before-dev":
-    "Discovers and injects project-specific coding guidelines from .trellis/spec/ before implementation begins. Reads spec indexes, pre-development checklists, and shared thinking guides for the target package. Use when starting a new coding task, before writing any code, switching to a different package, or needing to refresh project conventions and standards.",
+    "Read the relevant package and work-type spec bodies before editing. Use when starting implementation or switching packages or work types; an index or hook overview alone does not supply the rules.",
   brainstorm:
     "Clarify material requirements or scientific-route choices before implementation. Use when uncertainty affects the result; task creation and extra planning documents are not required.",
   check:
     "Choose and run the smallest checks needed for an implementation or scientific claim. Use when verifying changed work; do not default to full test or lint pipelines.",
   "break-loop":
-    "Deep bug analysis to break the fix-forget-repeat cycle. Analyzes root cause category, why fixes failed, prevention mechanisms, and captures knowledge into specs. Use after fixing a bug to prevent the same class of bugs.",
+    "Analyze a recurring or difficult failure and retain useful causes or counterevidence in the appropriate spec or research record. Use when a failure needs deeper diagnosis, not after every fix.",
   "update-spec":
-    "Captures executable contracts and coding conventions into .trellis/spec/ documents. Use when learning something valuable from debugging, implementing, or discussion that should be preserved for future sessions.",
+    "Preserve a reusable project convention or substantive research finding in its owning spec or package topic record. Use when a finding will help future work.",
 };
 
 /**
@@ -606,10 +606,8 @@ export function collectBothTemplates(
 // Pull-based sub-agent prelude (for class-2 platforms whose hook can't
 // inject sub-agent prompts: gemini, qoder, codex, copilot)
 //
-// Only implement & check need task-level context (task artifacts + jsonl specs).
-// research is orthogonal: it searches the spec tree and doesn't depend on an
-// active task. Hook-based platforms mirror this (their `get_research_context`
-// injects a spec-tree overview, not prd/jsonl). We leave research untouched.
+// Implement & check receive optional task discovery here. Research agent cards
+// load scoped work context directly and do not require an active task.
 // ---------------------------------------------------------------------------
 
 export type SubAgentType = "implement" | "check";
@@ -628,6 +626,10 @@ Follow \`.trellis/workflow.md\` and the assigned scope. Use an explicit
 Read its PRD and \`${jsonl}\` entries if present. Additional planning files
 are optional. With no task or manifest, use the self-contained assignment and
 relevant package docs/specs; do not block or create a task just for delegation.
+Follow Work context in the workflow: run
+\`python3 ./.trellis/scripts/get_context.py --mode work\` with the selected scope
+or \`--task <task>\`. Read the relevant spec bodies and linked topic record;
+a hook overview or index alone is insufficient. Refresh on a package/type switch.
 Ask only if the assignment itself is insufficient. Do the assigned work directly,
 without a mandatory nested agent pipeline.
 
