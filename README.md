@@ -1,3 +1,28 @@
+# Research-first, Engineering-light fork
+
+This personal fork is based on upstream v0.6.17. The `research-light` branch
+changes the default native workflow, task runtime and the currently used
+Claude/Codex/OpenCode/Pi entry points. Other platform integrations and optional
+workflow variants are retained, not exhaustively customized.
+
+Small changes are direct; long-running tasks use task.json + one PRD. Agents,
+context manifests, journals and Git operations are optional. Archive preserves
+status unless `--completed` is explicit. Numerical and scientific claims still
+require appropriate evidence. See [.trellis/workflow.md](.trellis/workflow.md).
+
+Build this checkout with `corepack pnpm install --frozen-lockfile` and
+`corepack pnpm build` when a pnpm shim is on PATH. Without a shim, run
+`corepack pnpm --filter @mindfoldhq/trellis-core exec tsc`, then
+`corepack pnpm --filter @mindfoldhq/trellis exec tsc`, and from `packages/cli`
+run `node scripts/copy-templates.js`. Run `node packages/cli/bin/trellis.js` from this checkout
+(or use its absolute path from a target project). Review customized local files
+when applying updates; do not blindly force overwrite project rules.
+The public npm package is upstream, not this fork. No npm release is made here.
+Upstream AGPL-3.0 licensing is unchanged.
+
+The original upstream introduction follows; its installation links and
+engineering-first descriptions refer to upstream behavior.
+
 <p align="center">
 <picture>
 <source srcset="assets/trellis.png" media="(prefers-color-scheme: dark)">

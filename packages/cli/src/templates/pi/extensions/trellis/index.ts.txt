@@ -1870,9 +1870,9 @@ export default function trellisExtension(pi: {
     label: "Trellis Subagent",
     description: "Run a Trellis project sub-agent with active task context.",
     promptSnippet:
-      'Sub-agent dispatch protocol (Trellis): your dispatch prompt MUST start with one line "Active task: <task path from `task.py current`>" before any other instructions.',
+      'Optional specialist delegation: supply a self-contained assignment and, when available, "Active task: <path>". Follow .trellis/workflow.md.',
     promptGuidelines: [
-      'Use subagent for task delegation. Your dispatch prompt MUST start with "Active task: <task path from `task.py current`>".',
+      'Use only for independent work that benefits from delegation; a task record is optional.',
     ],
     parameters: {
       type: "object",

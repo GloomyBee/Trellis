@@ -242,13 +242,13 @@ const SKILL_DESCRIPTIONS: Record<string, string> = {
   continue:
     "Resume work on the current task. Loads the workflow Phase Index, figures out which phase/step to pick up at, then pulls the step-level detail via get_context.py --mode phase. Use when coming back to an in-progress task and you need to know what to do next.",
   "finish-work":
-    "Wrap up the current session: verify quality gate passed, remind user to commit, archive completed tasks, and record session progress to the developer journal. Use when done coding and ready to end the session.",
+    "Close completed work with proportionate verification, update its PRD and archive without automatic Git writes or journals. Use when finishing an implementation task.",
   "before-dev":
     "Discovers and injects project-specific coding guidelines from .trellis/spec/ before implementation begins. Reads spec indexes, pre-development checklists, and shared thinking guides for the target package. Use when starting a new coding task, before writing any code, switching to a different package, or needing to refresh project conventions and standards.",
   brainstorm:
-    "Guides collaborative requirements discovery before implementation. Creates task directory, seeds PRD, asks high-value questions one at a time, researches technical choices, and converges on MVP scope. Use when requirements are unclear, there are multiple valid approaches, or the user describes a new feature or complex task.",
+    "Clarify material requirements or scientific-route choices before implementation. Use when uncertainty affects the result; task creation and extra planning documents are not required.",
   check:
-    "Comprehensive quality verification: spec compliance, lint, type-check, tests, cross-layer data flow, code reuse, and consistency checks. Use when code is written and needs quality verification, before committing changes, or to catch context drift during long sessions.",
+    "Choose and run the smallest checks needed for an implementation or scientific claim. Use when verifying changed work; do not default to full test or lint pipelines.",
   "break-loop":
     "Deep bug analysis to break the fix-forget-repeat cycle. Analyzes root cause category, why fixes failed, prevention mechanisms, and captures knowledge into specs. Use after fixing a bug to prevent the same class of bugs.",
   "update-spec":
@@ -282,7 +282,7 @@ const COMMAND_DESCRIPTIONS: Record<string, string> = {
   start: "Initialize a Trellis development session.",
   continue: "Resume work on the current task at the correct phase.",
   "finish-work":
-    "Wrap up the current session: quality gate, commit reminder, archive, journal.",
+    "Close work: focused verification, PRD update and archive; no default Git writes or journal.",
 };
 
 /** Wrap resolved command content with YAML frontmatter (name + description). */
@@ -622,26 +622,14 @@ export function buildPullBasedPrelude(agentType: SubAgentType): string {
 
   return replacePythonCommandLiterals(`## Required: Load Trellis Context First
 
-This platform does NOT auto-inject task context via hook. Before doing anything else, you MUST load context yourself.
-
-### Step 1: Find the active task path
-
-Try in order — stop at the first one that yields a task path:
-
-1. **Look at the dispatch prompt** you received from the main agent. If its first line is \`Active task: <path>\` (e.g. \`Active task: .trellis/tasks/04-17-foo\`), use that path. The main agent is required to include this line on class-2 platforms.
-2. **Run** \`python3 ./.trellis/scripts/task.py current --source\` and read the \`Current task:\` line.
-3. **If both fail** (no \`Active task:\` line in the prompt and \`task.py current\` returns no task), ask the user which task to work on; do NOT guess.
-
-### Step 2: Load task context from the resolved path
-
-1. Read \`<task-path>/${jsonl}\` — JSONL list of spec/research files relevant to this agent.
-2. For each entry in the JSONL, Read its \`file\` path — these are the specs and research notes you must follow.
-   **Skip rows without a \`"file"\` field** (e.g. \`{"_example": "..."}\` placeholder rows left over from an older \`task.py create\`).
-3. Read the task's \`prd.md\` (requirements), then \`design.md\` if present (technical design), then \`implement.md\` if present (execution plan).
-
-If \`${jsonl}\` has no curated entries (empty, only a placeholder row, or the file is missing), fall back to: read the task artifacts, list available specs with \`python3 ./.trellis/scripts/get_context.py --mode packages\`, and pick the specs that match the task domain yourself. Do NOT block on the missing jsonl — lightweight tasks may be PRD-only, while complex tasks may also include \`design.md\` and \`implement.md\`.
-
-If the resolved task path has no \`prd.md\`, ask the user what to work on; do NOT proceed without context.
+Follow \`.trellis/workflow.md\` and the assigned scope. Use an explicit
+\`Active task: <path>\` from the dispatch prompt when provided; otherwise
+\`python3 ./.trellis/scripts/task.py current --source\` may locate a task.
+Read its PRD and \`${jsonl}\` entries if present. Additional planning files
+are optional. With no task or manifest, use the self-contained assignment and
+relevant package docs/specs; do not block or create a task just for delegation.
+Ask only if the assignment itself is insufficient. Do the assigned work directly,
+without a mandatory nested agent pipeline.
 
 ---
 

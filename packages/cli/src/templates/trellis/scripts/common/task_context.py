@@ -3,15 +3,14 @@
 Task JSONL context management.
 
 Provides:
+    cmd_init_context  - Explicitly create optional JSONL context files
     cmd_add_context   - Add entry to JSONL context file
     cmd_validate      - Validate JSONL context files
     cmd_list_context  - List JSONL context entries
 
 Note:
-    ``cmd_init_context`` was removed in v0.5.0-beta.12. JSONL context files
-    are created empty at ``task.py create`` time; the AI agent curates real
-    entries during planning when the task needs sub-agent/spec context. See
-    ``.trellis/workflow.md`` for the current planning artifact contract.
+    Context manifests are optional. Create them with `task.py init-context`
+    or add entries directly with `task.py add-context` when useful.
 
     Older Trellis versions seeded those files with a ``{"_example": ...}``
     placeholder row. ``cmd_validate`` now rejects that row so a task cannot
@@ -54,6 +53,36 @@ _CODE_FILE_EXTENSIONS = {
     ".cpp",
     ".h",
 }
+
+
+# =============================================================================
+# Command: init-context
+# =============================================================================
+
+
+def cmd_init_context(args: argparse.Namespace) -> int:
+    """Explicitly create optional manifests without overwriting curated entries."""
+    repo_root = get_repo_root()
+    target_dir = resolve_task_dir(args.dir, repo_root)
+    if target_dir is None or not target_dir.is_dir():
+        print(colored("Error: task directory required", Colors.RED))
+        return 1
+
+    for name in ("implement.jsonl", "check.jsonl"):
+        path = target_dir / name
+        try:
+            # 排他创建，保留已有清单，避免重复初始化覆盖手工整理的上下文。
+            with path.open("x", encoding="utf-8"):
+                pass
+        except FileExistsError:
+            if not path.is_file():
+                print(colored(f"Error: context path is not a file: {path}", Colors.RED))
+                return 1
+        except OSError as exc:
+            print(colored(f"Error: could not create {path}: {exc}", Colors.RED))
+            return 1
+    print(colored("Context manifests ready; curate with add-context and check with validate.", Colors.GREEN))
+    return 0
 
 
 # =============================================================================
@@ -124,34 +153,6 @@ def cmd_add_context(args: argparse.Namespace) -> int:
 # =============================================================================
 # Command: validate
 # =============================================================================
-
-def curated_entry_count(jsonl_file: Path) -> int | None:
-    """Count curated entries in a jsonl context manifest.
-
-    Returns None when the file does not exist — `task.py create` seeds the
-    manifests only on sub-agent-capable platforms, so an absent file means no
-    sub-agent will ever read it and callers should not gate on it. A curated
-    entry is a JSON object row carrying a truthy ``file`` (or legacy ``path``)
-    value: the same rows the sub-agent injection hook materializes.
-    """
-    if not jsonl_file.is_file():
-        return None
-    try:
-        lines = jsonl_file.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return 0
-    count = 0
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict) and (data.get("file") or data.get("path")):
-            count += 1
-    return count
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -397,7 +398,7 @@ def _validate_jsonl(jsonl_file: Path, repo_root: Path, task_dir: Path | None = N
             f"    Curate it:  python3 .trellis/scripts/task.py add-context <task> {action} <path> \"<why>\""
         )
         print(
-            "    Intentionally empty? Bypass at start: task.py start <task> --allow-empty-context"
+            "    Context validation is explicit; empty manifests do not prevent task.py start."
         )
         return 1
 

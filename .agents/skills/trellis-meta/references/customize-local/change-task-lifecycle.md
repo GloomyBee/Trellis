@@ -1,5 +1,11 @@
 # Change Local Task Lifecycle
 
+This fork defaults to task.json + one PRD, no automatic JSONL or Git writes.
+Start does not require context manifests. Plain archive preserves status and
+completedAt; archive --completed explicitly records completion. Archival does
+not require a branch, PR or clean tree. after_archive is not proof of completion:
+consumers must read task status. See the actual workflow and runtime for policy.
+
 Task lifecycle includes creation, start, context configuration, finish, archive, parent/child tasks, and lifecycle hooks. The default customization targets are `.trellis/tasks/`, `.trellis/config.yaml`, and `.trellis/scripts/`.
 
 ## Read These Files First
@@ -30,13 +36,13 @@ Task lifecycle includes creation, start, context configuration, finish, archive,
 ```yaml
 hooks:
   after_create:
-    - "python3 .trellis/scripts/hooks/my_sync.py create"
+    - "python .trellis/scripts/hooks/my_sync.py create"
   after_start:
-    - "python3 .trellis/scripts/hooks/my_sync.py start"
+    - "python .trellis/scripts/hooks/my_sync.py start"
   after_finish:
-    - "python3 .trellis/scripts/hooks/my_sync.py finish"
+    - "python .trellis/scripts/hooks/my_sync.py finish"
   after_archive:
-    - "python3 .trellis/scripts/hooks/my_sync.py archive"
+    - "python .trellis/scripts/hooks/my_sync.py archive"
 ```
 
 Hook commands receive the `TASK_JSON_PATH` environment variable, pointing to the current task's `task.json`. Hook failures should usually warn, but not block the main task operation.
@@ -77,7 +83,7 @@ If you fork `task.py` to add a new creation path (e.g. an external import that b
 
 ## Modification Steps
 
-1. Confirm the current task with `python3 ./.trellis/scripts/task.py current --source`.
+1. Confirm the current task with `python ./.trellis/scripts/task.py current --source`.
 2. Read the current task's `task.json` and confirm status and fields.
 3. For configuration needs, edit `.trellis/config.yaml` first.
 4. For script behavior needs, then edit `.trellis/scripts/`.

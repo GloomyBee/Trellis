@@ -125,30 +125,6 @@ def configure_project_encoding(project_dir: Path) -> None:
         pass  # Optional encoding helper; host defaults are still usable.
 
 
-def _has_curated_jsonl_entry(jsonl_path: Path) -> bool:
-    """Return True iff jsonl has at least one row with a ``file`` field.
-
-    A newly created jsonl is empty, and older tasks may still carry a
-    ``{"_example": ...}`` placeholder row (no ``file`` key) — neither is
-    "ready". Readiness requires at least one curated entry. Matches the
-    contract used by ``inject-subagent-context.py``.
-    """
-    try:
-        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(row, dict) and row.get("file"):
-                return True
-    except (OSError, UnicodeDecodeError):
-        return False
-    return False
-
-
 def read_file(path: Path, fallback: str = "") -> str:
     try:
         return path.read_text(encoding="utf-8")
@@ -227,74 +203,27 @@ def _resolve_task_dir(trellis_dir: Path, task_ref: str) -> Path:
     return trellis_dir / "tasks" / path_obj
 
 
-def _get_task_status(trellis_dir: Path, hook_input: dict) -> str:
-    active = _resolve_active_task(trellis_dir, hook_input)
+def _get_task_status(trellis_dir: Path, input_data: dict) -> str:
+    """Report state; workflow.md alone decides the next action."""
+    active = _resolve_active_task(trellis_dir, input_data)
     if not active.task_path:
-        return (
-            "Status: NO ACTIVE TASK\n"
-            "Next: Classify the current turn and ask for task-creation consent "
-            "before creating any Trellis task."
-        )
-
+        return "Status: NO ACTIVE TASK\nNext: Follow request routing in .trellis/workflow.md."
     task_ref = active.task_path
     task_dir = _resolve_task_dir(trellis_dir, task_ref)
     if active.stale or not task_dir.is_dir():
-        return (
-            f"Status: STALE POINTER\nTask: {task_ref}\n"
-            "Next: Task directory not found. Run: python3 ./.trellis/scripts/task.py finish"
-        )
-
-    task_json_path = task_dir / "task.json"
-    task_data: dict = {}
-    if task_json_path.is_file():
-        try:
-            task_data = json.loads(task_json_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, PermissionError):
-            pass  # Optional task metadata; fall back to generic status.
-
-    task_title = task_data.get("title", task_ref)
-    task_status = task_data.get("status", "unknown")
-
-    if task_status == "completed":
-        return (
-            f"Status: COMPLETED\nTask: {task_title}\n"
-            f"Next: Archive with `python3 ./.trellis/scripts/task.py archive {task_dir.name}` "
-            "or start a new task."
-        )
-
-    has_prd = (task_dir / "prd.md").is_file()
-    has_design = (task_dir / "design.md").is_file()
-    has_implement = (task_dir / "implement.md").is_file()
-    present = [
-        name
-        for name in ("prd.md", "design.md", "implement.md", "implement.jsonl", "check.jsonl")
-        if (task_dir / name).is_file()
-    ]
-    present_line = ", ".join(present) if present else "none"
-
-    if not has_prd:
-        return (
-            f"Status: PLANNING\nTask: {task_title}\nPresent: {present_line}\n"
-            "Next: Load trellis-brainstorm and write prd.md. Stay in planning."
-        )
-
-    if task_status == "planning":
-        if has_design and has_implement:
-            next_action = "Review planning artifacts with the user before `task.py start`."
-        else:
-            next_action = (
-                "Lightweight task can ask for start review with PRD-only; "
-                "complex task must add design.md and implement.md before `task.py start`."
-            )
-        return (
-            f"Status: PLANNING\nTask: {task_title}\nPresent: {present_line}\n"
-            f"Next: {next_action}"
-        )
-
+        return f"Status: STALE POINTER\nTask: {task_ref}\nNext: Diagnose the stale reference without discarding user data."
+    try:
+        data = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("task.json must contain an object")
+    except (OSError, ValueError):
+        return f"Status: TASK ERROR\nTask: {task_ref}\nNext: Inspect the unreadable task metadata."
+    present = [name for name in ("prd.md", "design.md", "implement.md", "implement.jsonl", "check.jsonl")
+               if (task_dir / name).is_file()]
     return (
-        f"Status: {task_status.upper()}\nTask: {task_title}\nPresent: {present_line}\n"
-        "Next: Follow the matching per-turn workflow-state. Context order is jsonl entries, "
-        "prd.md, design.md if present, implement.md if present."
+        f"Status: {str(data.get('status', 'unknown')).upper()}\n"
+        f"Task: {data.get('title', task_ref)}\nPresent: {', '.join(present) or '(none)'}\n"
+        "Next: Follow the matching state and phase in .trellis/workflow.md."
     )
 
 

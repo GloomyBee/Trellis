@@ -115,9 +115,8 @@ export function ensureGitattributes(cwd: string): void {
  * This function creates the .trellis/ directory structure by:
  * 1. Copying scripts/ directory directly (dogfooding)
  * 2. Copying workflow.md and .gitignore (dogfooding)
- * 3. Creating workspace/ with index.md
- * 4. Creating tasks/ directory
- * 5. Creating spec/ with templates (not dogfooded - generic templates)
+ * 3. Creating tasks/ and channel agent definitions
+ * 4. Creating optional workspace/spec scaffolding for non-native workflows
  *
  * @param cwd - Current working directory
  * @param options - Workflow options including project type
@@ -158,10 +157,6 @@ export async function createWorkflowStructure(
     configYamlTemplate,
   );
 
-  // Ensure project-root .gitattributes carries the journal merge=union rule
-  // (additive-only — never overwrites a user's existing file wholesale).
-  ensureGitattributes(cwd);
-
   // Dispatch channel runtime agent definitions. These are platform-agnostic
   // Trellis runtime files consumed by `trellis channel spawn --agent <name>`
   // through `packages/cli/src/commands/channel/agent-loader.ts`. They are
@@ -173,15 +168,18 @@ export async function createWorkflowStructure(
     await writeFile(path.join(cwd, PATHS.AGENTS, agentFile), content);
   }
 
-  // Create workspace/ with index.md
+  // Native init leaves specs and journals to explicit user actions.
+  ensureDir(path.join(cwd, PATHS.TASKS));
+  if (options?.workflowMdOverride === undefined) return;
+
+  ensureGitattributes(cwd);
+
+  // Explicit non-native workflows retain their optional scaffolding.
   ensureDir(path.join(cwd, PATHS.WORKSPACE));
   await writeFile(
     path.join(cwd, PATHS.WORKSPACE, "index.md"),
     replacePythonCommandLiterals(agentProgressIndexContent),
   );
-
-  // Create tasks/ directory
-  ensureDir(path.join(cwd, PATHS.TASKS));
 
   // Create spec templates based on project type
   // These are NOT dogfooded - they are generic templates for new projects

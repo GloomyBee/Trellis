@@ -5,6 +5,7 @@ Task Management Script.
 
 Usage:
     python3 task.py create "<title>" --description "<desc>" [--slug <name>] [--assignee <dev>] [--priority P0|P1|P2|P3] [--parent <dir>] [--package <pkg>] [--no-start] [--force]
+    python3 task.py init-context <dir>          # Explicitly create optional JSONL files
     python3 task.py add-context <dir> <file> <path> [reason] # Add jsonl entry
     python3 task.py validate <dir>              # Validate jsonl files
     python3 task.py list-context <dir>          # List jsonl entries
@@ -16,7 +17,7 @@ Usage:
     python3 task.py set-scope <dir> <scope>     # Set scope for PR title
     python3 task.py set-meta <dir> <key> <value>  # Set a task metadata key
     python3 task.py rename <dir> <new-slug> [--dry-run]  # Rename task + references
-    python3 task.py archive <task-dir> [--skip-branch-validation]  # Archive completed task
+    python3 task.py archive <task-dir> [--completed] [--no-commit]  # Archive task
     python3 task.py list                        # List active tasks
     python3 task.py list-archive [month]        # List archived tasks
     python3 task.py add-subtask <parent-dir> <child-dir>     # Link child to parent
@@ -54,7 +55,7 @@ from common.io import (
     write_json,
 )
 from common.task_utils import resolve_task_dir, run_task_hooks
-from common.tasks import iter_active_tasks, children_progress
+from common.tasks import iter_active_tasks, get_all_statuses, children_progress
 
 # Import command handlers from split modules (also re-exports for plan.py compatibility)
 from common.task_store import (
@@ -72,7 +73,7 @@ from common.task_context import (
     cmd_add_context,
     cmd_validate,
     cmd_list_context,
-    curated_entry_count,
+    cmd_init_context,
 )
 
 
@@ -88,9 +89,8 @@ def _record_start_state(
     """Move a freshly started task to in_progress and record its branch.
 
     Both updates share one read/write: the status flip from planning, and the
-    checked-out branch when `branch` is still empty. Recording at start is what
-    keeps `branch` trustworthy at archive time — a task whose branch is only
-    ever set by hand tends to reach archive with `branch: null`.
+    checked-out branch when `branch` is still empty. Branch metadata is useful
+    for reference but is not required for starting or archiving a task.
 
     Tolerant on purpose — a broken task.json does not fail `start`, because the
     session pointer is the point of the command. But the read overwrites the
@@ -115,14 +115,11 @@ def _record_start_state(
 
     # Only fill an empty field: an explicit `set-branch` must survive a later
     # `start` (re-starting a task after a checkout is a normal thing to do).
-    base_branch_conflict: str | None = None
     if not data.get("branch"):
         branch = current_branch_name(repo_root)
         if branch:
             data["branch"] = branch
             applied.append(f"✓ Branch recorded: {branch}{label}")
-            if branch == data.get("base_branch"):
-                base_branch_conflict = branch
         else:
             print(
                 colored(
@@ -150,22 +147,6 @@ def _record_start_state(
     for line in applied:
         print(colored(line, Colors.GREEN))
 
-    if base_branch_conflict:
-        # Recorded anyway — the value is true, it just cannot describe a PR.
-        # Archive refuses this shape, so say so now rather than at the gate.
-        print(
-            colored(
-                f"Warning: '{base_branch_conflict}' is also this task's base_branch; "
-                "a PR cannot target its own branch, and archive will refuse it.",
-                Colors.YELLOW,
-            ),
-            file=sys.stderr,
-        )
-        print(
-            f"Once you branch off, run: python3 {DIR_WORKFLOW}/scripts/task.py "
-            "set-branch <task> <feature-branch>",
-            file=sys.stderr,
-        )
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -190,29 +171,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(colored(f"Error: Task not found: {task_input}", Colors.RED))
         print("Hint: Use task name (e.g., 'my-task') or full path (e.g., '.trellis/tasks/01-31-my-task')")
         return 1
-
-    # Context-manifest gate (#573): a seeded-but-uncurated implement/check
-    # manifest means every sub-agent dispatched for this task runs with zero
-    # spec context, and nothing downstream surfaces that to the main session.
-    # An absent manifest is not gated — create seeds the files only on
-    # sub-agent-capable platforms, so absence means no sub-agent reads them.
-    if not getattr(args, "allow_empty_context", False):
-        empty_manifests = [
-            name
-            for name in ("implement.jsonl", "check.jsonl")
-            if curated_entry_count(full_path / name) == 0
-        ]
-        if empty_manifests:
-            print(colored(
-                f"Error: {' and '.join(empty_manifests)} "
-                f"{'has' if len(empty_manifests) == 1 else 'have'} no curated entries",
-                Colors.RED,
-            ))
-            print("Sub-agents (implement/check) would run with zero spec context.")
-            print(f"  Curate:  python3 .trellis/scripts/task.py add-context {task_input} implement <path> \"<why>\"")
-            print(f"  Verify:  python3 .trellis/scripts/task.py validate {task_input}")
-            print("  Intentionally empty? Re-run start with --allow-empty-context")
-            return 1
 
     # Convert to relative path for storage. repo_root is resolved because
     # full_path already is (resolve_task_dir only returns paths inside the
@@ -263,7 +221,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             _record_start_state(task_json_path, repo_root)
 
         print()
-        print(colored("The hook will now inject context from this task's jsonl files.", Colors.BLUE))
+        print(colored("Task is active; existing task artifacts and optional context can be loaded.", Colors.BLUE))
 
         run_task_hooks("after_start", task_json_path, repo_root)
         return 0
@@ -383,7 +341,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     # Single pass: collect all tasks via shared iterator
     all_tasks = {t.dir_name: t for t in iter_active_tasks(tasks_dir)}
-    all_statuses = {name: t.status for name, t in all_tasks.items()}
+    all_statuses = get_all_statuses(tasks_dir)
 
     if as_json:
         if filter_mine and not developer:
@@ -531,6 +489,7 @@ Usage:
   python3 task.py create <title> --description <desc> --package <pkg>   Create task for a specific package
   python3 task.py create <title> --description <desc> --parent <dir>    Create task as child of parent
   python3 task.py create <title> --description <desc> --no-start        Create without making it active in this session
+  python3 task.py init-context <dir>                Create optional implement/check JSONL files
   python3 task.py add-context <dir> <jsonl> <path> [reason]  Add entry to jsonl
   python3 task.py validate <dir>                     Validate jsonl files
   python3 task.py list-context <dir>                 List jsonl entries
@@ -542,7 +501,7 @@ Usage:
   python3 task.py set-scope <dir> <scope>            Set scope for PR title
   python3 task.py set-meta <dir> <key> <value>       Set/overwrite a task metadata key
   python3 task.py rename <dir> <new-slug>            Rename task, identity fields and references
-  python3 task.py archive <task-dir>                 Archive completed task
+  python3 task.py archive <task-dir> [--completed]   Archive task; optionally mark completed
   python3 task.py add-subtask <parent> <child>       Link child task to parent
   python3 task.py remove-subtask <parent> <child>    Unlink child from parent
   python3 task.py list [--mine] [--status <status>] [--json]  List tasks
@@ -556,13 +515,8 @@ Rename options:
 
 Archive options:
   --no-commit                Skip the auto git commit after archiving
-  --skip-branch-validation   Archive despite missing or self-referential branch metadata.
-                             Archive normally refuses a task with no `branch` when it has a
-                             `base_branch` and the repo has a remote, or with
-                             `branch == base_branch`; repair those with `set-branch` /
-                             `set-base-branch` instead. Use this flag only for tasks that
-                             were never PR-backed. A recorded branch that was merged and
-                             deleted is only a warning and needs no flag.
+  --completed                Mark completed and record today as the completion date.
+                             Without this flag, preserve status and completedAt.
 
 List options:
   --mine, -m           Show only tasks assigned to current developer
@@ -582,7 +536,7 @@ Examples:
   python3 task.py rename add-login add-sso --dry-run  # Preview the change set
   python3 task.py rename add-login add-sso
   python3 task.py archive add-login
-  python3 task.py archive add-login --skip-branch-validation  # Task never had a branch of its own
+  python3 task.py archive add-login --completed     # Explicitly mark work completed
   python3 task.py add-subtask parent-task child-task  # Link existing tasks
   python3 task.py remove-subtask parent-task child-task
   python3 task.py list                               # List all active tasks
@@ -597,36 +551,6 @@ Examples:
 
 def main() -> int:
     """CLI entry point."""
-    # Deprecation guard: `init-context` was removed in v0.5.0-beta.12.
-    # Detect early so argparse doesn't mask the real reason with a generic
-    # "invalid choice" error.
-    if len(sys.argv) >= 2 and sys.argv[1] == "init-context":
-        print(
-            colored(
-                "Error: `task.py init-context` was removed in v0.5.0-beta.12.",
-                Colors.RED,
-            ),
-            file=sys.stderr,
-        )
-        print(
-            "implement.jsonl / check.jsonl are now seeded on `task.py create` for",
-            file=sys.stderr,
-        )
-        print(
-            "sub-agent-capable platforms and curated by the AI during planning when needed.",
-            file=sys.stderr,
-        )
-        print("See .trellis/workflow.md planning artifact guidance or run:", file=sys.stderr)
-        print(
-            "  python3 ./.trellis/scripts/get_context.py --mode phase --step 1",
-            file=sys.stderr,
-        )
-        print(
-            "Use `task.py add-context <dir> implement|check <path> <reason>` to append entries.",
-            file=sys.stderr,
-        )
-        return 2
-
     parser = argparse.ArgumentParser(
         description="Task Management Script",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -666,6 +590,10 @@ def main() -> int:
         help="Overwrite task.json when the task directory already exists",
     )
 
+    # init-context
+    p_init = subparsers.add_parser("init-context", help="Create optional context manifests")
+    p_init.add_argument("dir", help="Task directory")
+
     # add-context
     p_add = subparsers.add_parser("add-context", help="Add context entry")
     p_add.add_argument("dir", help="Task directory")
@@ -684,11 +612,6 @@ def main() -> int:
     # start
     p_start = subparsers.add_parser("start", help="Set active task")
     p_start.add_argument("dir", help="Task directory")
-    p_start.add_argument(
-        "--allow-empty-context",
-        action="store_true",
-        help="Start even when implement.jsonl / check.jsonl have no curated entries",
-    )
 
     # current
     p_current = subparsers.add_parser("current", help="Show active task")
@@ -736,12 +659,9 @@ def main() -> int:
     p_archive.add_argument("name", help="Task directory or name")
     p_archive.add_argument("--no-commit", action="store_true", help="Skip auto git commit after archive")
     p_archive.add_argument(
-        "--skip-branch-validation",
+        "--completed",
         action="store_true",
-        help=(
-            "Archive even when branch metadata is missing or self-referential "
-            "(for tasks that were never PR-backed)"
-        ),
+        help="Mark completed and set completion date before archiving (default: preserve state)",
     )
 
     # list
@@ -772,6 +692,7 @@ def main() -> int:
 
     commands = {
         "create": cmd_create,
+        "init-context": cmd_init_context,
         "add-context": cmd_add_context,
         "validate": cmd_validate,
         "list-context": cmd_list_context,

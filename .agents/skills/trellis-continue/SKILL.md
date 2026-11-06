@@ -5,14 +5,14 @@ description: "Resume work on the current task. Loads the workflow Phase Index, f
 
 # Continue Current Task
 
-Resume work on the current task — pick up at the right phase/step in `.trellis/workflow.md`.
+Resume the current task by loading its state, then reading the matching step in `.trellis/workflow.md`.
 
 ---
 
 ## Step 1: Load Current Context
 
 ```bash
-python3 ./.trellis/scripts/get_context.py
+python ./.trellis/scripts/get_context.py
 ```
 
 Confirms: current task, git state, recent commits.
@@ -20,42 +20,32 @@ Confirms: current task, git state, recent commits.
 ## Step 2: Load the Phase Index
 
 ```bash
-python3 ./.trellis/scripts/get_context.py --mode phase
+python ./.trellis/scripts/get_context.py --mode phase
 ```
 
 Shows the Phase Index (Plan / Execute / Finish) with routing + skill mapping.
 
-## Step 3: Decide Where You Are
+## Step 3: Resume Where You Are
 
-`get_context.py` shows the active task's `status` field. Route by `status` + artifact presence. This command replaces the user needing to remember the Trellis flow; it does not itself approve implementation.
+Route by the task's `status` and what its directory actually contains:
 
-- `status=planning` + no `prd.md` → **1.1** (load `trellis-brainstorm`)
-- `status=planning` + `prd.md` only → decide whether the task is lightweight or complex. Lightweight can move to **1.4** review; complex returns to **1.1** to add `design.md` + `implement.md`.
-- `status=planning` + complex artifacts complete + sub-agent jsonl not curated (empty, or only a legacy `_example` placeholder row) → **1.3**
-- `status=planning` + required artifacts complete + required jsonl curated or inline mode → **1.4** (ask for start review; only run `task.py start` after user confirms)
-- `status=in_progress` + implementation not started → **2.1**
-- `status=in_progress` + implementation done, not yet checked → **2.2**
-- `status=in_progress` + check passed → **3.3** (spec update) → **3.4** (commit)
-- `status=completed` (rare; usually archived immediately) → archive flow
+- `planning`, no `prd.md` → write `prd.md` (goal, scope, acceptance criteria). Load `trellis-brainstorm` if the requirements are genuinely unclear; if the request is already clear, write the PRD and move on.
+- `planning`, `prd.md` exists → start the task and implement. No further planning artifact is required.
+- `in_progress` → continue the work. Do not re-request approval for work the user already authorized.
+- done → archive it (see ``finish-work` (Trellis command)`).
 
-Phase rules (full detail in `.trellis/workflow.md`):
-
-1. Run steps **in order** within a phase — `[required]` steps must not be skipped
-2. `[once]` steps are already done if the required output exists. `prd.md` alone can be enough only for lightweight tasks; complex tasks also need `design.md` and `implement.md`.
-3. You may go back to an earlier phase if discoveries require it
+`design.md`, `implement.md`, and the JSONL manifests are optional — add one only when the task is large enough to justify it. A task carrying only `prd.md` is complete and valid.
 
 ## Step 4: Load the Specific Step
 
-Once you know which step to resume at:
-
 ```bash
-python3 ./.trellis/scripts/get_context.py --mode phase --step <X.X> --platform codex
+python ./.trellis/scripts/get_context.py --mode phase --step <X.X> --platform codex
 ```
 
-Follow the loaded instructions. After each `[required]` step completes, move to the next.
+Follow the loaded instructions for that step only.
 
 ---
 
 ## Reference
 
-Full workflow and detailed phase steps live in `.trellis/workflow.md`. This command is only an entry point — the canonical guidance is there.
+`.trellis/workflow.md` holds the canonical phases and step detail. This command is an entry point, not a second copy of the rules.

@@ -1,6 +1,8 @@
 # Backend Development Guidelines
 
-> Best practices for backend development in this project.
+> Source-repository technical references. Workflow and validation policy come
+> from `.trellis/workflow.md`; historical examples below do not reintroduce
+> task, document, agent, test-suite or journal gates.
 
 ---
 
@@ -68,19 +70,9 @@ Also read [unit-test/conventions.md](../unit-test/conventions.md) — specifical
 
 ## Quality Check
 
-After writing code, verify against these guidelines:
-
-1. Run `git diff --name-only` to see what you changed
-2. Read the relevant guidelines above for each changed area
-3. Always check [quality-guidelines.md](./quality-guidelines.md)
-4. Check if tests need to be added or updated:
-   - New pure function → needs unit test
-   - Bug fix → needs regression test
-   - Changed init/update behavior → needs integration test update
-5. Run lint and typecheck:
-   ```bash
-   pnpm lint && pnpm typecheck
-   ```
+Inspect the affected behavior and use the smallest existing checks that establish
+it. New unit tests, regression files, full lint/typecheck pipelines and journals
+are not automatic requirements. Explicit task scientific requirements still apply.
 
 ---
 

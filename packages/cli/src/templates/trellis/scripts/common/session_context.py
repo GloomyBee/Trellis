@@ -653,7 +653,7 @@ def get_context_text(repo_root: Path | None = None) -> str:
 
     # Collect all task data for hierarchy display
     all_tasks = {t.dir_name: t for t in iter_active_tasks(tasks_dir)}
-    all_statuses = {name: t.status for name, t in all_tasks.items()}
+    all_statuses = get_all_statuses(tasks_dir)
 
     def _print_task_tree(name: str, indent: int = 0) -> None:
         nonlocal task_count
@@ -738,9 +738,9 @@ def get_context_record_json(repo_root: Path | None = None) -> dict:
 
     root_git_info = _collect_root_git_info(repo_root)
 
-    # My tasks (single pass — collect statuses and filter by assignee)
+    # Active assignments plus actual archived statuses for child progress.
     all_tasks_list = list(iter_active_tasks(tasks_dir))
-    all_statuses = {t.dir_name: t.status for t in all_tasks_list}
+    all_statuses = get_all_statuses(tasks_dir)
 
     my_tasks = []
     for t in all_tasks_list:

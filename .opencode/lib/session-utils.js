@@ -5,7 +5,7 @@ import { execFileSync } from "child_process"
 import { platform } from "os"
 import { debugLog } from "./trellis-context.js"
 
-const PYTHON_CMD = platform() === "win32" ? "python" : "python3"
+const PYTHON_CMD = platform() === "win32" ? "python" : "python"
 
 const FIRST_REPLY_NOTICE = `<first-reply-notice>
 On the first visible assistant reply in this session, briefly acknowledge that Trellis SessionStart context loaded.
@@ -18,103 +18,24 @@ The acknowledgment must not alter the language used for the remainder of the res
 This notice is one-shot: do not repeat it after the first visible assistant reply in this session.
 </first-reply-notice>`
 
-function hasCuratedJsonlEntry(jsonlPath) {
-  try {
-    const content = readFileSync(jsonlPath, "utf-8")
-    for (const rawLine of content.split(/\r?\n/)) {
-      const line = rawLine.trim()
-      if (!line) continue
-      try {
-        const row = JSON.parse(line)
-        if (row && typeof row === "object" && typeof row.file === "string" && row.file) {
-          return true
-        }
-      } catch {
-        // Ignore malformed line
-      }
-    }
-  } catch {
-    return false
-  }
-  return false
-}
-
 function getTaskStatus(ctx, platformInput = null) {
   const active = ctx.getActiveTask(platformInput)
   const taskRef = active.taskPath
-  if (!taskRef) {
-    return (
-      "Status: NO ACTIVE TASK\n" +
-      "Next-Action: Classify the current turn before creating any Trellis task. " +
-      "Simple conversation / small task asks only whether this turn should create a Trellis task. " +
-      "Complex task asks whether task creation and planning are allowed."
-    )
-  }
-
+  if (!taskRef) return "Status: NO ACTIVE TASK\nNext: Follow request routing in .trellis/workflow.md."
   const taskDir = ctx.resolveTaskDir(taskRef)
-
   if (active.stale || !taskDir || !existsSync(taskDir)) {
-    return `Status: STALE POINTER\nTask: ${taskRef}\nNext-Action: Task directory not found. Run: python3 ./.trellis/scripts/task.py finish`
+    return `Status: STALE POINTER\nTask: ${taskRef}\nNext: Diagnose the stale reference without discarding user data.`
   }
-
-  let taskData = {}
-  const taskJsonPath = join(taskDir, "task.json")
-  if (existsSync(taskJsonPath)) {
-    try {
-      taskData = JSON.parse(readFileSync(taskJsonPath, "utf-8"))
-    } catch {
-      // Ignore parse errors
-    }
+  let data
+  try {
+    data = JSON.parse(readFileSync(join(taskDir, "task.json"), "utf-8"))
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("task.json must contain an object")
+  } catch {
+    return `Status: TASK ERROR\nTask: ${taskRef}\nNext: Inspect the unreadable task metadata.`
   }
-
-  const taskTitle = taskData.title || taskRef
-  const taskStatus = taskData.status || "unknown"
-
-  if (taskStatus === "completed") {
-    return `Status: COMPLETED\nTask: ${taskTitle}\nNext-Action: Run /trellis:finish-work. If the working tree is dirty, return to Phase 3.4 first.`
-  }
-
-  const hasPrd = existsSync(join(taskDir, "prd.md"))
-  const hasDesign = existsSync(join(taskDir, "design.md"))
-  const hasImplementPlan = existsSync(join(taskDir, "implement.md"))
-  const artifactNames = ["prd.md", "design.md", "implement.md", "implement.jsonl", "check.jsonl"]
-  const present = artifactNames.filter(name => existsSync(join(taskDir, name)))
-  if (existsSync(join(taskDir, "research"))) present.push("research/")
-  const presentLine = present.length > 0 ? present.join(", ") : "(none)"
-  const implementJsonl = join(taskDir, "implement.jsonl")
-  const checkJsonl = join(taskDir, "check.jsonl")
-  const jsonlReady =
-    (!existsSync(implementJsonl) || hasCuratedJsonlEntry(implementJsonl)) &&
-    (!existsSync(checkJsonl) || hasCuratedJsonlEntry(checkJsonl))
-
-  if (taskStatus === "planning" && !hasPrd) {
-    return `Status: PLANNING\nTask: ${taskTitle}\nPresent: ${presentLine}\nNext-Action: Load trellis-brainstorm and write prd.md. Stay in planning.`
-  }
-
-  if (taskStatus === "planning") {
-    const missingComplex = []
-    if (!hasDesign) missingComplex.push("design.md")
-    if (!hasImplementPlan) missingComplex.push("implement.md")
-    const nextBits = []
-    if (missingComplex.length > 0) {
-      nextBits.push(
-        `Lightweight task can request start review with PRD-only; complex task must add ${missingComplex.join(", ")} before start`,
-      )
-    } else {
-      nextBits.push("Planning artifacts are present; ask for review before `task.py start`")
-    }
-    if (!jsonlReady) {
-      nextBits.push("curate `implement.jsonl` and `check.jsonl` before sub-agent mode start")
-    }
-    return `Status: PLANNING\nTask: ${taskTitle}\nPresent: ${presentLine}\nNext-Action: ${nextBits.join("; ")}. Do not enter implementation until the user confirms start.`
-  }
-
-  return (
-    `Status: ${String(taskStatus).toUpperCase()}\nTask: ${taskTitle}\n` +
-    `Present: ${presentLine}\n` +
-    "Next-Action: Follow the matching per-turn workflow-state. " +
-    "Implementation/check context order is jsonl entries -> `prd.md` -> `design.md if present` -> `implement.md if present`."
-  )
+  const present = ["prd.md", "design.md", "implement.md", "implement.jsonl", "check.jsonl"]
+    .filter(name => existsSync(join(taskDir, name)))
+  return `Status: ${String(data.status || "unknown").toUpperCase()}\nTask: ${data.title || taskRef}\nPresent: ${present.join(", ") || "(none)"}\nNext: Follow the matching state and phase in .trellis/workflow.md.`
 }
 
 function loadTrellisConfig(directory, contextKey = null) {
@@ -332,7 +253,7 @@ function buildCompactCurrentState(ctx, platformInput, specIndexPaths) {
     try {
       const activeTasks = readdirSync(tasksDir, { withFileTypes: true })
         .filter(entry => entry.isDirectory() && entry.name !== "archive" && existsSync(join(tasksDir, entry.name, "task.json")))
-      lines.push(`Active tasks: ${activeTasks.length} total. Use \`python3 ./.trellis/scripts/task.py list --mine\` only if needed.`)
+      lines.push(`Active tasks: ${activeTasks.length} total. Use \`python ./.trellis/scripts/task.py list --mine\` only if needed.`)
     } catch {
       // Ignore task list errors
     }
@@ -394,7 +315,7 @@ Trellis compact SessionStart context. Use it to orient the session; load details
     const allLines = workflowContent.split("\n")
     const overviewLines = [
       "# Development Workflow - Session Summary",
-      "Full guide: .trellis/workflow.md. Step detail: `python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>`.",
+      "Full guide: .trellis/workflow.md. Step detail: `python ./.trellis/scripts/get_context.py --mode phase --step <X.Y>`.",
       "",
     ]
 
@@ -442,7 +363,7 @@ Trellis compact SessionStart context. Use it to orient the session; load details
 
   parts.push(
     "Discover more via: " +
-    "`python3 ./.trellis/scripts/get_context.py --mode packages`"
+    "`python ./.trellis/scripts/get_context.py --mode packages`"
   )
   parts.push("</guidelines>")
 

@@ -95,42 +95,10 @@ should set the env explicitly inside the test (`process.env.X = "..."` in a
 
 ## When to Write Tests
 
-### Must write
-
-| Change Type | Test Type | Example |
-|-------------|-----------|---------|
-| New pure/utility function | Unit test | Added `compareVersions()` → test boundary values |
-| New platform | Unit (auto-covered by `registry-invariants.test.ts`) | Added opencode → invariants verify consistency |
-| Bug fix | Regression test | Fixed Windows encoding → add to `regression.test.ts` |
-| Changed init/update behavior | Integration test | Changed downgrade logic → add/update scenario in `update.integration.test.ts` |
-
-### Don't need tests
-
-| Change Type | Reason |
-|-------------|--------|
-| Template text / doc content changes | No logic change |
-| New migration manifest JSON | `registry-invariants.test.ts` auto-validates format |
-| CLI flag description text | Display-only |
-
-### Must update existing tests
-
-| Change Type | What to Update |
-|-------------|----------------|
-| New command/skill added to a platform | Add to `EXPECTED_COMMAND_NAMES` / `EXPECTED_SKILL_NAMES` in that platform's test file |
-| New command added to ANY platform | Add to every affected file under `test/templates/` — see platform-integration spec for the required command list |
-
-### Decision flow
-
-```
-Does this change have logic branches?
-├─ No (pure data/text) → Don't write tests
-└─ Yes
-   ├─ Standalone function with predictable input→output? → Unit test
-   ├─ Fixing a historical bug? → Regression test (verify fix exists in source)
-   └─ Changes init/update end-to-end behavior? → Integration test
-```
-
----
+Follow proportionate verification in `.trellis/workflow.md`. Prefer existing
+focused tests; add one only when it meaningfully checks the behavior at risk.
+No test-per-function/bug, TDD or full-suite mandate. Scientific claims require
+corresponding numerical evidence. Technical conventions below apply when needed.
 
 ## File Naming
 

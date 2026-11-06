@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from .io import describe_json_read_failure, read_json_checked
-from .paths import FILE_TASK_JSON
+from .paths import DIR_ARCHIVE, FILE_TASK_JSON
 from .types import TaskInfo
 
 
@@ -84,9 +84,9 @@ def iter_active_tasks(tasks_dir: Path) -> Iterator[TaskInfo]:
 
 
 def get_all_statuses(tasks_dir: Path) -> dict[str, str]:
-    """Get a {dir_name: status} mapping for all active tasks.
+    """Get actual statuses for active and archived tasks.
 
-    Useful for computing children progress without loading full TaskInfo.
+    Archived tasks contribute their stored status, never an inferred completion.
 
     Args:
         tasks_dir: Path to the tasks directory.
@@ -94,7 +94,16 @@ def get_all_statuses(tasks_dir: Path) -> dict[str, str]:
     Returns:
         Dict mapping directory names to status strings.
     """
-    return {t.dir_name: t.status for t in iter_active_tasks(tasks_dir)}
+    statuses: dict[str, str] = {}
+    archive_dir = tasks_dir / DIR_ARCHIVE
+    if archive_dir.is_dir():
+        for task_json in sorted(archive_dir.glob("*/*/task.json")):
+            task = load_task(task_json.parent)
+            if task is not None:
+                statuses[task.dir_name] = task.status
+    # 活跃任务优先；归档只提供真实状态，不根据目录是否消失推断完成。
+    statuses.update({t.dir_name: t.status for t in iter_active_tasks(tasks_dir)})
+    return statuses
 
 
 def children_progress(
@@ -112,11 +121,9 @@ def children_progress(
     """
     if not children:
         return ""
-    # A child missing from active statuses has been archived (cmd_archive
-    # sets status=completed before moving the dir). Count it as done so
-    # parent progress doesn't regress when children are archived.
+    # 缺失或仅行政归档的子任务不能自动算作已完成。
     done = sum(
         1 for c in children
-        if c not in all_statuses or all_statuses.get(c) in ("completed", "done")
+        if all_statuses.get(c) in ("completed", "done")
     )
     return f" [{done}/{len(children)} done]"

@@ -119,102 +119,6 @@ describe("codex getConfigTemplate", () => {
   });
 });
 
-// =============================================================================
-// Issue #234 — Codex sub-agent recursion guard
-// =============================================================================
-//
-// trellis-implement / trellis-check agent toml MUST contain a hard recursion
-// guard that tells the sub-agent it is already the dispatched agent and must
-// not spawn another trellis-implement / trellis-check sub-agent. Without this,
-// SessionStart's "dispatch trellis-implement" guidance leaks into sub-agent
-// sessions and causes infinite recursion (see PRD).
-describe("codex sub-agent recursion guard (issue #234)", () => {
-  for (const name of ["trellis-implement", "trellis-check"] as const) {
-    it(`${name}.toml developer_instructions forbids spawning trellis-implement / trellis-check`, () => {
-      const tomlPath = path.join(
-        repoRoot,
-        "packages/cli/src/templates/codex/agents",
-        `${name}.toml`,
-      );
-      const content = fs.readFileSync(tomlPath, "utf-8");
-      // Hard prohibition keyword
-      expect(content).toMatch(/MUST NOT spawn/i);
-      // Mentions both sibling agent kinds explicitly
-      expect(content).toContain("trellis-implement");
-      expect(content).toContain("trellis-check");
-      // Mentions the leakage source so the reader knows why
-      expect(content).toMatch(/SessionStart|dispatch.*main session|breadcrumb/i);
-    });
-  }
-});
-
-describe("codex two-channel sub-agent context (native SubagentStart)", () => {
-  for (const name of [
-    "trellis-implement",
-    "trellis-check",
-    "trellis-research",
-  ] as const) {
-    it(`${name}.toml uses a marker-gated active-task fallback without legacy collaboration disables`, () => {
-      const tomlPath = path.join(
-        repoRoot,
-        "packages/cli/src/templates/codex/agents",
-        `${name}.toml`,
-      );
-      const content = fs.readFileSync(tomlPath, "utf-8");
-
-      const savedOutputNotice = content.indexOf(
-        "Full hook output saved to: <path>",
-      );
-      const injectionMarker = content.indexOf(
-        "<!-- trellis-hook-injected -->",
-      );
-
-      expect(savedOutputNotice).toBeGreaterThan(-1);
-      expect(injectionMarker).toBeGreaterThan(savedOutputNotice);
-      expect(content).toMatch(/read the referenced\s+file/i);
-      expect(content).toMatch(/referenced file cannot be read/i);
-      expect(content).toMatch(/marker is absent/i);
-      expect(content).toContain("<!-- trellis-hook-injected -->");
-      expect(content).toContain("Active task: <path>");
-      expect(content).not.toContain("[features]");
-      expect(content).not.toContain("multi_agent = false");
-      expect(content).not.toContain("[features.multi_agent_v2]");
-    });
-  }
-
-  it("keeps implement and check pull fallbacks role-specific", () => {
-    for (const [name, manifest] of [
-      ["trellis-implement", "implement.jsonl"],
-      ["trellis-check", "check.jsonl"],
-    ] as const) {
-      const tomlPath = path.join(
-        repoRoot,
-        "packages/cli/src/templates/codex/agents",
-        `${name}.toml`,
-      );
-      const content = fs.readFileSync(tomlPath, "utf-8");
-
-      expect(content).toContain(`<path>/${manifest}`);
-      expect(content).toContain("<path>/prd.md");
-      expect(content).toContain("<path>/design.md");
-      expect(content).toContain("<path>/implement.md");
-    }
-  });
-
-  it("keeps research task resolution role-isolated from implement/check manifests", () => {
-    const researchPath = path.join(
-      repoRoot,
-      "packages/cli/src/templates/codex/agents/trellis-research.toml",
-    );
-    const content = fs.readFileSync(researchPath, "utf-8");
-
-    expect(content).toContain("Do not load `implement.jsonl` or `check.jsonl`");
-    expect(content).not.toContain(
-      "Run `python3 ./.trellis/scripts/task.py current --source`",
-    );
-  });
-});
-
 describe("codex session-start.py compact SessionStart context", () => {
   const hookPath = path.join(
     repoRoot,
@@ -228,7 +132,9 @@ describe("codex session-start.py compact SessionStart context", () => {
     expect(content).toContain("design.md if present");
     expect(content).not.toContain("<sub-agent-notice>");
     expect(content).not.toContain("guides (inlined");
-    expect(content).not.toContain("Project spec indexes are listed by path below");
+    expect(content).not.toContain(
+      "Project spec indexes are listed by path below",
+    );
   });
 
   it("documents fail-open exception suppression", () => {

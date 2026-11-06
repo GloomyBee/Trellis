@@ -80,7 +80,9 @@ These build the `Map<relPath, content>` that a `collect<Platform>Templates()` re
 
 `configurators/shared.ts:SubAgentType` — `"implement" | "check"`. `research` is intentionally excluded — research doesn't depend on an active task; it traverses the spec tree.
 
-`configurators/shared.ts:buildPullBasedPrelude` — returns the standard "Required: Load Trellis Context First" block. Used by class-2 platforms whose hook can't inject the sub-agent prompt (Gemini, Qoder, Codex, Copilot). The prelude tells the sub-agent to: (1) read `Active task: <path>` from the dispatch prompt; (2) fall back to `task.py current --source`; (3) ask the user. See `platform-integration.md` "Active task discovery on class-2 platforms (issue #225)" for why all three layers are needed.
+`configurators/shared.ts:buildPullBasedPrelude` — supplies a thin workflow
+reference and optional task-context discovery to pull-based agents. A complete
+assignment works without a task or JSONL; absent manifests never block work.
 
 `configurators/shared.ts:detectSubAgentType` — returns `"implement"` / `"check"` / `null` from a filename like `trellis-implement.md`. Strips `.md`, `.toml`, `.prompt.md`. Returns `null` for `trellis-research` and unknown names — they skip the prelude.
 

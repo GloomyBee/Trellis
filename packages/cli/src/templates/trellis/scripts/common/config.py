@@ -21,8 +21,8 @@ from .trellis_config import parse_simple_yaml
 # Defaults
 DEFAULT_SESSION_COMMIT_MESSAGE = "chore: record journal"
 DEFAULT_MAX_JOURNAL_LINES = 2000
-DEFAULT_SESSION_AUTO_COMMIT = True
-DEFAULT_CODEX_DISPATCH_MODE = "auto"
+DEFAULT_SESSION_AUTO_COMMIT = False
+DEFAULT_CODEX_DISPATCH_MODE = "inline"
 
 CONFIG_FILE = "config.yaml"
 
@@ -121,14 +121,13 @@ def get_session_auto_commit(repo_root: Path | None = None) -> bool:
     Governs both ``add_session.py:_auto_commit_workspace`` and
     ``task_store.py:_auto_commit_archive``.
 
-    Default: ``True`` (existing behavior — auto-stage + auto-commit).
-    Set ``session_auto_commit: false`` in ``.trellis/config.yaml`` to skip
-    auto-staging entirely; the journal/archive files are still written to
-    disk, but the user manages ``git add`` / ``git commit`` themselves.
+    Default: ``False``; journal/archive files are written to disk while the
+    user manages git. Set ``session_auto_commit: true`` to opt into automatic
+    staging and commits.
 
     Accepts native YAML booleans (``true`` / ``false``) and the string
     aliases ``true / false / yes / no / 1 / 0 / on / off`` (case-insensitive).
-    Invalid values fall back to ``True`` with a stderr warning.
+    Invalid values fall back to ``False`` with a stderr warning.
     """
     config = _load_config(repo_root)
     raw = config.get("session_auto_commit", DEFAULT_SESSION_AUTO_COMMIT)
@@ -140,9 +139,9 @@ def get_session_auto_commit(repo_root: Path | None = None) -> bool:
 def get_codex_dispatch_mode(repo_root: Path | None = None) -> str:
     """Return Codex dispatch mode.
 
-    Default is ``auto``, which dispatches Trellis sub-agents and uses native
-    context injection with a child-side fallback. ``inline`` is an explicit
-    opt-out. ``sub-agent`` remains a backwards-compatible alias for ``auto``.
+    Default is ``inline``: the main agent works directly and may delegate
+    when useful. ``auto`` defaults to Trellis sub-agents with native context
+    injection and a child-side fallback. ``sub-agent`` is an alias for ``auto``.
 
     Invalid explicit configuration falls back to ``inline`` rather than
     unexpectedly dispatching a sub-agent. This CLI-facing parser is the only

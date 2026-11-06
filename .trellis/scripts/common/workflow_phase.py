@@ -163,14 +163,14 @@ _PLATFORM_MARKER_LABELS: dict[str, str] = {
 def resolve_effective_platform(platform: str, config: dict) -> str:
     """Map ``codex`` to a dispatch-mode-namespaced virtual platform name.
 
-    When ``--platform codex`` is passed, return ``"codex-sub-agent"`` by
-    default or ``"codex-inline"`` when explicitly configured in
+    When ``--platform codex`` is passed, return ``"codex-inline"`` by
+    default or ``"codex-sub-agent"`` when explicitly configured in
     ``.trellis/config.yaml``. ``sub-agent`` remains an alias for ``auto``.
     ``filter_platform`` then surfaces blocks whose marker lists include the
     namespaced name (e.g. ``[codex-sub-agent, ...]`` or ``[codex-inline, Kilo,
     Antigravity, Devin]``).
 
-    Native Codex context injection supports the ``auto`` default. Invalid
+    Native Codex context injection supports explicit ``auto`` mode. Invalid
     explicit values fall back to ``inline`` safely; this renderer deliberately
     does not warn because it can run in normal CLI output flows.
 
@@ -181,7 +181,7 @@ def resolve_effective_platform(platform: str, config: dict) -> str:
     if label:
         return label
     if platform == "codex":
-        mode = "auto"
+        mode = "inline"
         codex_cfg = config.get("codex") if isinstance(config, dict) else None
         if codex_cfg is not None:
             if not isinstance(codex_cfg, dict):

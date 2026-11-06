@@ -63,6 +63,11 @@ Do not assume the user has the Trellis source repository. Do not default to modi
 
 ## Current Rules
 
+Research-light policy comes from the actual workflow.md: JSON + one PRD by
+default, optional context and delegation, no automatic journal/Git writes.
+Plain archive preserves state; --completed explicitly marks completion.
+Technical references describe capabilities, not mandatory daily procedures.
+
 - `.trellis/workflow.md` is the local workflow source of truth; its initial content was selected from a workflow template (built-in `native`, `tdd`, `channel-driven-subagent-dispatch`, or a marketplace template) at `trellis init` time and can be re-selected via `trellis workflow --template <id>`. Missing `.trellis/agents/<name>.md` files referenced by the active template trigger a non-blocking stderr warning pointing at `trellis update`.
 - `.trellis/config.yaml` is the project-level Trellis configuration entry point. It hosts task lifecycle hooks (`hooks.after_create` / `after_start` / `after_finish` / `after_archive`), journal shape (`session_commit_message` / `max_journal_lines` / `session_auto_commit`), channel worker guard (`channel.worker_guard.idle_timeout` / `max_live_workers`), Codex dispatch mode (`codex.dispatch_mode: inline | sub-agent`), and the spec registry block (`registry.spec.source` + `registry.spec.template`).
 - `.trellis/spec/` stores the user's project-specific coding conventions and design constraints. When `registry.spec` is set, files are refreshed by `trellis update`; local edits surface as "modified by user" conflicts in `.trellis/.template-hashes.json`.

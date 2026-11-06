@@ -1,5 +1,12 @@
 # Local Task System
 
+Research-light defaults: task.json + one PRD; manifests and additional artifacts
+are optional, never start gates. Plain archive preserves status/completedAt;
+`archive --completed` explicitly records completion. No default journal or Git
+writes. Historical layout descriptions below describe supported optional files,
+not requirements. Read the current workflow and script help before acting.
+
+
 The Trellis task system is stored entirely under `.trellis/tasks/` in the user project. Each task is a directory containing requirements, context, research, state, and relationship information.
 
 ## Task Directory Structure

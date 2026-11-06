@@ -1,5 +1,11 @@
 # Local Task System
 
+Research-light defaults: task.json + one PRD; manifests and additional artifacts
+are optional, never start gates. Plain archive preserves status/completedAt;
+`archive --completed` explicitly records completion. No default journal or Git
+writes. Historical layout descriptions below describe supported optional files,
+not requirements. Read the current workflow and script help before acting.
+
 The Trellis task system is stored entirely under `.trellis/tasks/` in the user project. Each task is a directory containing requirements, context, research, state, and relationship information.
 
 ## Task Directory Structure
@@ -59,14 +65,14 @@ Use child tasks for deliverables that can move through planning, implementation,
 Create new children with:
 
 ```bash
-python3 ./.trellis/scripts/task.py create "<child title>" --description "<one-line summary>" --slug <child-slug> --parent <parent-dir>
+python ./.trellis/scripts/task.py create "<child title>" --description "<one-line summary>" --slug <child-slug> --parent <parent-dir>
 ```
 
 Link or unlink existing tasks with:
 
 ```bash
-python3 ./.trellis/scripts/task.py add-subtask <parent-dir> <child-dir>
-python3 ./.trellis/scripts/task.py remove-subtask <parent-dir> <child-dir>
+python ./.trellis/scripts/task.py add-subtask <parent-dir> <child-dir>
+python ./.trellis/scripts/task.py remove-subtask <parent-dir> <child-dir>
 ```
 
 `children` on the parent is a historical list. When a child is archived, Trellis keeps that child name in the parent so progress like `[2/3 done]` remains meaningful after completed children move to `archive/`.
@@ -106,13 +112,13 @@ Rules:
 ## Common Commands
 
 ```bash
-python3 ./.trellis/scripts/task.py create "<title>" --description "<one-line summary>" --slug <slug>
-python3 ./.trellis/scripts/task.py start <task>
-python3 ./.trellis/scripts/task.py current --source
-python3 ./.trellis/scripts/task.py add-context <task> implement <file> <reason>
-python3 ./.trellis/scripts/task.py validate <task>
-python3 ./.trellis/scripts/task.py finish
-python3 ./.trellis/scripts/task.py archive <task>
+python ./.trellis/scripts/task.py create "<title>" --description "<one-line summary>" --slug <slug>
+python ./.trellis/scripts/task.py start <task>
+python ./.trellis/scripts/task.py current --source
+python ./.trellis/scripts/task.py add-context <task> implement <file> <reason>
+python ./.trellis/scripts/task.py validate <task>
+python ./.trellis/scripts/task.py finish
+python ./.trellis/scripts/task.py archive <task>
 ```
 
 When modifying the task system, the AI should prefer script commands to maintain structure. Edit JSON/Markdown directly only when scripts do not cover the need.

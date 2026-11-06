@@ -27,9 +27,11 @@ const TEMPLATE_SCRIPTS = path.resolve(
   "../../src/templates/trellis/scripts",
 );
 
+const PYTHON = process.platform === "win32" ? "python" : "python3";
+
 function hasPython(): boolean {
   try {
-    execFileSync("python3", ["--version"], { stdio: "ignore" });
+    execFileSync(PYTHON, ["--version"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -90,7 +92,7 @@ function makeTask(repo: string, name: string, prdBody: string): void {
 
 function runArchive(repo: string, taskName: string): void {
   const r = spawnSync(
-    "python3",
+    PYTHON,
     [".trellis/scripts/task.py", "archive", taskName],
     { cwd: repo, encoding: "utf-8" },
   );
@@ -99,198 +101,178 @@ function runArchive(repo: string, taskName: string): void {
   }
 }
 
-describe.skipIf(!hasPython())(
-  "task.py archive auto-commit",
-  () => {
-    let tmp: string;
+describe.skipIf(!hasPython())("task.py archive auto-commit", () => {
+  let tmp: string;
 
-    beforeEach(() => {
-      tmp = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-archive-test-"));
-      setupRepo(tmp);
-    });
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-archive-test-"));
+    setupRepo(tmp);
+  });
 
-    afterEach(() => {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    });
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 
-    it("does not bundle dirty changes from other task dirs (scope-creep fix)", () => {
-      makeTask(tmp, "task-a", "task A prd\n");
-      makeTask(tmp, "task-b", "task B prd v1\n");
-      git(tmp, "add", "-A");
-      git(tmp, "commit", "-q", "-m", "initial");
+  it("does not bundle dirty changes from other task dirs (scope-creep fix)", () => {
+    makeTask(tmp, "task-a", "task A prd\n");
+    makeTask(tmp, "task-b", "task B prd v1\n");
+    git(tmp, "add", "-A");
+    git(tmp, "commit", "-q", "-m", "initial");
 
-      // Dirty edit in task-b BEFORE archiving task-a.
-      fs.appendFileSync(
-        path.join(tmp, ".trellis", "tasks", "task-b", "prd.md"),
-        "DIRTY EDIT IN TASK-B SHOULD NOT BE COMMITTED\n",
-      );
-
-      runArchive(tmp, "task-a");
-
-      // Last commit: which files?
-      const lastFiles = git(
-        tmp,
-        "show",
-        "HEAD",
-        "--name-only",
-        "--pretty=format:",
-      )
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      // task-b paths must NOT appear in the archive commit.
-      const leaked = lastFiles.filter((f) => f.includes("/task-b/"));
-      expect(leaked).toEqual([]);
-
-      // task-b dirty change still in working tree.
-      const status = git(tmp, "status", "--porcelain");
-      expect(status).toMatch(/M\s+\.trellis\/tasks\/task-b\/prd\.md/);
-    });
-
-    it("does not sweep pre-staged unrelated files into the archive commit (#579)", () => {
-      makeTask(tmp, "task-a", "task A prd\n");
-      git(tmp, "add", "-A");
-      git(tmp, "commit", "-q", "-m", "initial");
-
-      // The developer stages an unrelated file BEFORE archiving.
-      fs.writeFileSync(path.join(tmp, "README.md"), "unrelated staged work\n");
-      git(tmp, "add", "README.md");
-
-      runArchive(tmp, "task-a");
-
-      const lastFiles = git(
-        tmp,
-        "show",
-        "HEAD",
-        "--name-only",
-        "--pretty=format:",
-      )
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      // The archive commit contains only Trellis-owned paths.
-      expect(lastFiles).not.toContain("README.md");
-      expect(lastFiles.every((f) => f.startsWith(".trellis/"))).toBe(true);
-
-      // The developer's file is still staged, ready for their own commit.
-      const status = git(tmp, "status", "--porcelain");
-      expect(status).toMatch(/^A\s+README\.md/m);
-    });
-
-    it(
-      "stages source-side deletions in the archive commit (phantom-delete fix)",
-      () => {
-        makeTask(tmp, "big", "# big task\n");
-        // Add many files under research/ to mimic the production case that
-        // surfaced the bug.
-        const researchDir = path.join(
-          tmp,
-          ".trellis",
-          "tasks",
-          "big",
-          "research",
-        );
-        fs.mkdirSync(researchDir, { recursive: true });
-        for (let i = 0; i < 100; i++) {
-          fs.writeFileSync(
-            path.join(researchDir, `file-${i}.json`),
-            `{"n":${i}}\n`,
-          );
-        }
-        git(tmp, "add", "-A");
-        git(tmp, "commit", "-q", "-m", "initial");
-
-        runArchive(tmp, "big");
-
-        // Working tree must be clean (no phantom deletes against HEAD).
-        const status = git(tmp, "status", "--porcelain");
-        const meaningful = status
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .filter((s) => !s.includes("__pycache__")); // ignore .pyc noise
-        expect(meaningful).toEqual([]);
-
-        // Archive commit has deletions at the source location.
-        const deletes = git(
-          tmp,
-          "show",
-          "HEAD",
-          "--diff-filter=D",
-          "--name-only",
-          "--pretty=format:",
-        )
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        expect(deletes.length).toBeGreaterThan(0);
-        expect(
-          deletes.every((p) => p.startsWith(".trellis/tasks/big/")),
-        ).toBe(true);
-      },
-      30_000, // python startup + 100-file ops can be slow
+    // Dirty edit in task-b BEFORE archiving task-a.
+    fs.appendFileSync(
+      path.join(tmp, ".trellis", "tasks", "task-b", "prd.md"),
+      "DIRTY EDIT IN TASK-B SHOULD NOT BE COMMITTED\n",
     );
 
-    it("refuses to archive a mistyped name that resolves to a real source dir", () => {
-      makeTask(tmp, "real-task", "# real task\n");
-      // A user source directory that is NOT a task.
-      const srcDir = path.join(tmp, "src");
-      fs.mkdirSync(srcDir, { recursive: true });
-      fs.writeFileSync(path.join(srcDir, "index.ts"), "export const x = 1;\n");
-      git(tmp, "add", "-A");
-      git(tmp, "commit", "-q", "-m", "initial");
+    runArchive(tmp, "task-a");
 
-      // Typo: `archive src` instead of a task name. resolve_task_dir falls
-      // back to repo_root/src; without the guard this moves the whole source
-      // dir into .trellis/tasks/archive/.
-      const r = spawnSync(
-        "python3",
-        [".trellis/scripts/task.py", "archive", "src"],
-        { cwd: tmp, encoding: "utf-8" },
-      );
+    // Last commit: which files?
+    const lastFiles = git(
+      tmp,
+      "show",
+      "HEAD",
+      "--name-only",
+      "--pretty=format:",
+    )
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-      expect(r.status).not.toBe(0);
-      expect(r.stderr).toContain("refusing to archive");
-      // src/ untouched, still at its original location with its file.
-      expect(fs.existsSync(path.join(srcDir, "index.ts"))).toBe(true);
-      // No archive dir was created holding a moved src.
-      expect(
-        fs.existsSync(
-          path.join(tmp, ".trellis", "tasks", "archive"),
-        ),
-      ).toBe(false);
-    });
+    // task-b paths must NOT appear in the archive commit.
+    const leaked = lastFiles.filter((f) => f.includes("/task-b/"));
+    expect(leaked).toEqual([]);
 
-    it("fails when archive auto-commit cannot record tracked source deletes", () => {
-      makeTask(tmp, "tracked", "# tracked task\n");
-      git(tmp, "add", "-A");
-      git(tmp, "commit", "-q", "-m", "initial");
+    // task-b dirty change still in working tree.
+    const status = git(tmp, "status", "--porcelain");
+    expect(status).toMatch(/M\s+\.trellis\/tasks\/task-b\/prd\.md/);
+  });
 
-      // Simulate a repo where git can stage the archive move but cannot
-      // create the commit. A failing hook is deterministic even when the
-      // developer machine has global git identity configured.
-      const hookPath = path.join(tmp, ".git", "hooks", "pre-commit");
+  it("default archive preserves state and leaves pre-staged work untouched", () => {
+    fs.writeFileSync(path.join(tmp, ".trellis", "config.yaml"), "");
+    makeTask(tmp, "task-a", "task A prd\n");
+    git(tmp, "add", "-A");
+    git(tmp, "commit", "-q", "-m", "initial");
+    const before = git(tmp, "rev-parse", "HEAD");
+    fs.writeFileSync(path.join(tmp, "README.md"), "unrelated staged work\n");
+    git(tmp, "add", "README.md");
+
+    runArchive(tmp, "task-a");
+
+    expect(git(tmp, "rev-parse", "HEAD")).toBe(before);
+    expect(git(tmp, "diff", "--cached", "--name-only")).toBe("README.md");
+    const archive = path.join(tmp, ".trellis", "tasks", "archive");
+    const month = fs.readdirSync(archive)[0];
+    const data = JSON.parse(
+      fs.readFileSync(
+        path.join(archive, month, "task-a", "task.json"),
+        "utf-8",
+      ),
+    );
+    expect(data.status).toBe("in_progress");
+    expect(data.completedAt).toBeUndefined();
+  });
+
+  it("stages source-side deletions in the archive commit (phantom-delete fix)", () => {
+    makeTask(tmp, "big", "# big task\n");
+    // Add many files under research/ to mimic the production case that
+    // surfaced the bug.
+    const researchDir = path.join(tmp, ".trellis", "tasks", "big", "research");
+    fs.mkdirSync(researchDir, { recursive: true });
+    for (let i = 0; i < 100; i++) {
       fs.writeFileSync(
-        hookPath,
-        "#!/bin/sh\necho archive commit blocked >&2\nexit 1\n",
+        path.join(researchDir, `file-${i}.json`),
+        `{"n":${i}}\n`,
       );
-      fs.chmodSync(hookPath, 0o755);
+    }
+    git(tmp, "add", "-A");
+    git(tmp, "commit", "-q", "-m", "initial");
 
-      const r = spawnSync(
-        "python3",
-        [".trellis/scripts/task.py", "archive", "tracked"],
-        { cwd: tmp, encoding: "utf-8" },
-      );
+    runArchive(tmp, "big");
 
-      expect(r.status).not.toBe(0);
-      expect(r.stderr).toContain("Archive moved on disk");
-      expect(r.stderr).toContain("Auto-commit failed");
+    // Working tree must be clean (no phantom deletes against HEAD).
+    const status = git(tmp, "status", "--porcelain");
+    const meaningful = status
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((s) => !s.includes("__pycache__")); // ignore .pyc noise
+    expect(meaningful).toEqual([]);
 
-      const status = git(tmp, "status", "--porcelain");
-      expect(status).toContain(".trellis/tasks/tracked/");
-      expect(status).toContain(".trellis/tasks/archive/");
-    });
-  },
-);
+    // Archive commit has deletions at the source location.
+    const deletes = git(
+      tmp,
+      "show",
+        "HEAD",
+        "--no-renames",
+        "--diff-filter=D",
+      "--name-only",
+      "--pretty=format:",
+    )
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(deletes.length).toBeGreaterThan(0);
+    expect(deletes.every((p) => p.startsWith(".trellis/tasks/big/"))).toBe(
+      true,
+    );
+  }, 30_000); // python startup + 100-file ops can be slow
+
+  it("refuses to archive a mistyped name that resolves to a real source dir", () => {
+    makeTask(tmp, "real-task", "# real task\n");
+    // A user source directory that is NOT a task.
+    const srcDir = path.join(tmp, "src");
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, "index.ts"), "export const x = 1;\n");
+    git(tmp, "add", "-A");
+    git(tmp, "commit", "-q", "-m", "initial");
+
+    // Typo: `archive src` instead of a task name. resolve_task_dir falls
+    // back to repo_root/src; without the guard this moves the whole source
+    // dir into .trellis/tasks/archive/.
+    const r = spawnSync(
+      PYTHON,
+      [".trellis/scripts/task.py", "archive", "src"],
+      { cwd: tmp, encoding: "utf-8" },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("refusing to archive");
+    // src/ untouched, still at its original location with its file.
+    expect(fs.existsSync(path.join(srcDir, "index.ts"))).toBe(true);
+    // No archive dir was created holding a moved src.
+    expect(fs.existsSync(path.join(tmp, ".trellis", "tasks", "archive"))).toBe(
+      false,
+    );
+  });
+
+  it("fails when archive auto-commit cannot record tracked source deletes", () => {
+    makeTask(tmp, "tracked", "# tracked task\n");
+    git(tmp, "add", "-A");
+    git(tmp, "commit", "-q", "-m", "initial");
+
+    // Simulate a repo where git can stage the archive move but cannot
+    // create the commit. A failing hook is deterministic even when the
+    // developer machine has global git identity configured.
+    const hookPath = path.join(tmp, ".git", "hooks", "pre-commit");
+    fs.writeFileSync(
+      hookPath,
+      "#!/bin/sh\necho archive commit blocked >&2\nexit 1\n",
+    );
+    fs.chmodSync(hookPath, 0o755);
+
+    const r = spawnSync(
+      PYTHON,
+      [".trellis/scripts/task.py", "archive", "tracked"],
+      { cwd: tmp, encoding: "utf-8" },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("Archive moved on disk");
+    expect(r.stderr).toContain("Auto-commit failed");
+
+    const status = git(tmp, "status", "--porcelain");
+    expect(status).toContain(".trellis/tasks/tracked/");
+    expect(status).toContain(".trellis/tasks/archive/");
+  });
+});

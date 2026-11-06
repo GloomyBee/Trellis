@@ -1,21 +1,17 @@
 <!-- TRELLIS:START -->
 # Trellis Instructions
 
-These instructions are for AI assistants working in this project.
+Read `.trellis/workflow.md` for the project workflow and its lightweight defaults.
+Read only the affected package's relevant rules in `.trellis/spec/` and docs.
 
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+- Small clear changes do not require a task; long-running work uses task.json
+  and prd.md under `.trellis/tasks/`.
+- Scientific evidence belongs to the package docs/cases/runs, not task copies.
+- Main agents work directly; specialist agents and Trellis tools are optional.
+- No default journal, full test pipeline or Git writes. Explicit task requirements
+  take precedence; retain necessary numerical and scientific verification.
 
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
-
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
-
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
-
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
-
+Platform helpers may live in `.agents/skills/` and platform-specific directories.
+They are thin entry points to the workflow, not additional rule sources.
+Managed by Trellis; content outside this block is preserved by updates.
 <!-- TRELLIS:END -->

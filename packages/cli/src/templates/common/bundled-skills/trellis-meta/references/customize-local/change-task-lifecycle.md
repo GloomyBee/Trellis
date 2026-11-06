@@ -1,5 +1,12 @@
 # Change Local Task Lifecycle
 
+This fork defaults to task.json + one PRD, no automatic JSONL or Git writes.
+Start does not require context manifests. Plain archive preserves status and
+completedAt; archive --completed explicitly records completion. Archival does
+not require a branch, PR or clean tree. after_archive is not proof of completion:
+consumers must read task status. See the actual workflow and runtime for policy.
+
+
 Task lifecycle includes creation, start, context configuration, finish, archive, parent/child tasks, and lifecycle hooks. The default customization targets are `.trellis/tasks/`, `.trellis/config.yaml`, and `.trellis/scripts/`.
 
 ## Read These Files First

@@ -1361,115 +1361,13 @@ staff confirmations, Claude Code canary test) lives in the archived task:
 
 ---
 
-## Planning Artifact and JSONL Context Contract
+## Planning and Context
 
-### Scope / Trigger
-
-Task planning is artifact-driven:
-
-- `prd.md` is created by `task.py create` and stores requirements, constraints, and acceptance criteria.
-- `design.md` is required for complex tasks and stores technical design, boundaries, data flow, contracts, and tradeoffs.
-- `implement.md` is required for complex tasks and stores execution order, checklist, validation commands, and rollback points.
-- `implement.jsonl` / `check.jsonl` are spec and research manifests for implement/check context. They do not replace `implement.md`.
-
-Lightweight tasks may be PRD-only. Complex tasks must have `prd.md`, `design.md`, and `implement.md` before `task.py start` moves the task into implementation.
-
-### Lifecycle
-
-1. **Create** — `task.py create` writes `task.json` with `status = planning`, creates the default `prd.md`, and creates empty `implement.jsonl` / `check.jsonl` when a sub-agent-capable platform is detected. Curation instructions are printed to the console, never written into the files.
-2. **Plan** — AI updates `prd.md`. If the task is complex, AI also writes `design.md` and `implement.md`; if sub-agent/spec context is needed, AI curates jsonl entries.
-3. **Review / start** — the user reviews the planning artifacts. `task.py start` is valid when the task's artifact gate is satisfied.
-4. **Consume** — hook, prelude, Pi extension, and OpenCode plugin read context in the same order: jsonl entries, `prd.md`, `design.md` if present, `implement.md` if present.
-
-### Signatures
-
-**Placeholder row schema** (`{"_example": "..."}`) — written by Trellis versions before this contract change. `task.py validate` rejects it, matching PR preflight, which treats it as unresolved scaffolding. Remediation: delete the line, or replace it with a curated row.
-
-**Curated row schema** (written by AI):
-
-```json
-{ "file": "<repo-relative-path>", "reason": "<one-line rationale>" }
-```
-
-Optional `type: "directory"` is supported for directory entries. Consumers ignore any other fields.
-
-### Contracts
-
-| Contract                  | Enforcer                                        | Behavior                                                                           |
-| ------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Task creation             | `task_store.py`                                 | Always creates default `prd.md`; never auto-creates `design.md` or `implement.md`. |
-| Lightweight planning gate | workflow-state / SessionStart / continue        | PRD-only is valid when the task is clearly small.                                  |
-| Complex planning gate     | workflow-state / SessionStart / continue        | Requires `prd.md`, `design.md`, and `implement.md` before `task.py start`.         |
-| Non-entry detection       | Every jsonl consumer                            | Row without a `file` key is treated as non-entry and skipped.                      |
-| Empty-file tolerance      | hook / prelude / plugin readers                 | Missing or empty jsonl is tolerated; task artifacts still load.                    |
-| Context order             | hook / prelude / Pi extension / OpenCode plugin | jsonl entries → `prd.md` → `design.md` if present → `implement.md` if present.     |
-| Archived self-references  | `task_context.py` validation                    | Preserve JSONL bytes. For an archived task, remap only exact `.trellis/tasks/<same-task-name>/...` references into that archive copy. Other paths retain repo-root resolution. |
-
-### Validation & Error Matrix
-
-| Condition                                              | Behavior                                                                                              | Exit / Surface          |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------- |
-| `implement.jsonl` is empty (freshly created)           | `cmd_validate` reports 0 errors; `cmd_list_context` prints "(no curated entries yet)"                 | Exit 0                  |
-| `implement.jsonl` holds a legacy `{"_example": …}` row | `cmd_validate` prints "Placeholder \`_example\` row …" with file, line, and remediation                | Exit 1                  |
-| `implement.jsonl` entry points at non-existent file    | `cmd_validate` prints "File not found: …" per row                                                     | Exit 1                  |
-| Archived self-reference exists in the archive copy     | Resolve inside `.trellis/tasks/archive/<year-month>/<same-task-name>/`; do not rewrite the manifest        | Exit 0                  |
-| Archived self-reference is absent from the archive copy | Report it missing even if an active task with the same name has recreated the path                         | Exit 1                  |
-| Archived self-reference traverses or follows a symlink outside the archive | Reject it as missing; never fall back to the historical active-task path                    | Exit 1                  |
-| Lightweight task has only `prd.md`                     | Valid planning state; SessionStart / continue can ask for start review                                | No error                |
-| Complex task is missing `design.md` or `implement.md`  | Stay in planning; ask user to complete missing planning artifacts                                     | Hook / command guidance |
-| Sub-agent platform detected, but jsonl is missing      | Context readers fall back to task artifacts and warn where applicable                                 | No create failure       |
-
-### Good / Base / Bad Cases
-
-- **Good**: complex task has `prd.md`, `design.md`, `implement.md`, and curated jsonl manifests. Context consumers load jsonl entries first, then all three artifacts.
-- **Good (archived)**: a moved task keeps its JSONL byte-for-byte; validation binds exact historical self-references to files or directories inside its archive copy while unrelated repository paths still resolve from the repository root.
-- **Base**: lightweight task has only `prd.md`. SessionStart / continue treats this as a valid planning state and may ask for start review.
-- **Bad**: complex task has only `prd.md` plus seed-only jsonl. SessionStart / continue must keep the task in planning; it must not treat jsonl file existence as implementation readiness.
-- **Bad (archived)**: validation resolves a historical self-reference through a recreated active task, or accepts `..` / a symlink that escapes the archived task directory.
-
-### Wrong vs Correct
-
-#### Wrong
-
-```python
-def is_ready(task_dir: Path) -> bool:
-    return (task_dir / "prd.md").is_file() and (task_dir / "implement.jsonl").is_file()
-```
-
-File existence alone cannot distinguish a lightweight PRD-only task from an incomplete complex task, and a seed-only jsonl manifest is not curated context.
-
-#### Correct
-
-```python
-def planning_next_action(task_dir: Path, is_complex: bool, inline_mode: bool) -> str:
-    if not (task_dir / "prd.md").is_file():
-        return "write-prd"
-    if is_complex and (
-        not (task_dir / "design.md").is_file()
-        or not (task_dir / "implement.md").is_file()
-    ):
-        return "complete-complex-artifacts"
-    if not inline_mode and not has_curated_jsonl(task_dir):
-        return "curate-jsonl"
-    return "review-before-start"
-```
-
-The route depends on task intent, artifact presence, and execution mode. Missing optional artifacts are skipped for lightweight tasks, but complex tasks cannot enter implementation until their planning artifacts are complete.
-
-For archived validation, resolving every JSONL path as `repo_root / file_path`
-is wrong because a preserved self-reference points at the task's former active
-location. Resolve only the exact same-task prefix against the archived task
-directory, require its canonical target to stay within that directory, and
-leave every unrelated path on normal repository-root resolution.
-
-### Tests Required
-
-- **Create behavior**: `task.py create` creates default `prd.md` and empty jsonl only on sub-agent-capable platforms, and prints the curation instructions to the console.
-- **Consumer tolerance**: `inject-subagent-context.py` skips rows without a `file` key and still injects task artifacts.
-- **Validate placeholder**: `task.py validate` passes for empty jsonl and fails with a remediation message for a legacy `{"_example": …}` row, in both active and archived tasks.
-- **Validate archive binding**: cover archived self files and directories, unrelated paths, a missing archive copy with a recreated active task, traversal, symlink escape, and unchanged active-task behavior.
-- **List-context empty**: `task.py list-context` prints "(no curated entries yet)" for an uncurated jsonl.
-- **Artifact gates**: workflow-state, SessionStart, and continue distinguish PRD-only lightweight tasks from complex tasks that still need `design.md` / `implement.md`.
+A task defaults to task.json + one PRD. Additional planning files and JSONL
+manifests are optional, not start gates. Explicit init-context/add-context can
+curate worker references; validate checks supplied manifests. Bounded injection,
+path containment and tolerance of absent optional files remain. A complete
+standalone worker assignment does not require a task.
 
 ## Context Injection Limits Contract (`context_injection`)
 
@@ -2089,69 +1987,11 @@ This keeps state minimal, avoids the "task.json drifts from filesystem reality" 
 
 ---
 
-## Bootstrap & Joiner Task Auto-Generation
+## Native Initialization
 
-`trellis init` generates a first-session task based on checkout state. Three branches dispatch off two filesystem flags:
-
-| `.trellis/` exists? | `.trellis/.developer` exists? | Meaning                                                           | Task generated                           |
-| ------------------- | ----------------------------- | ----------------------------------------------------------------- | ---------------------------------------- |
-| no                  | n/a                           | First-time `init` on this project                                 | `00-bootstrap-guidelines` (creator flow) |
-| yes                 | no                            | Fresh clone / per-checkout first-init (new machine, new teammate) | `00-join-<slug>` (joiner flow)           |
-| yes                 | yes                           | Same dev re-running init                                          | none (no-op)                             |
-
-### Design Decision: `.developer` File Is the Per-Checkout Signal
-
-**Context**: we need a signal for "this checkout has never been init'd by this developer before" to trigger joiner onboarding.
-
-**Options Considered**:
-
-1. `.trellis/workspace/<name>/` directory existence — ❌ this dir is committed to git, so a fresh clone already has it
-2. A registry file listing onboarded developers — ❌ needs migration + bookkeeping, over-engineered for single-user checkouts
-3. `.trellis/.developer` file existence — ✅ **chosen**
-
-**Decision**: Use `.trellis/.developer` (gitignored) as the per-checkout onboarding signal.
-
-**Why**: `.trellis/.developer` is declared in `.trellis/.gitignore` (template `gitignore.txt`), so it is never committed. A fresh clone has an empty `.developer` slot by construction; the first `init` writes it. Subsequent same-machine re-inits see the file and no-op.
-
-**Consequence (accepted)**: Same developer on two machines (laptop A + laptop B) gets a joiner task on laptop B. This is fine — it's a chance to re-read the spec, and archiving is one command.
-
-**Anti-pattern**: Do not use `.trellis/workspace/<name>/` existence as "this developer already onboarded" — that directory is the journal archive and belongs to git.
-
-### Gotcha: Joiner Dispatch Must Be Wired in Two Places
-
-`trellis init` has two code paths that both reach the end of initialization but through different branches of `init()`. Any new init-time trigger (joiner onboarding, future first-session tasks, etc.) must be registered in **both**:
-
-**Path 1 — Main dispatch** (`src/commands/init.ts`, near the end of `init()`):
-
-- Reached only when `!isFirstInit` is false **OR** `options.force` / `options.skipExisting` is set
-- Fires from the block that runs after `createWorkflowStructure` + `init_developer.py`
-
-**Path 2 — Re-init fast path** (`handleReinit`, inside `doAddDeveloper` branch):
-
-- Reached when `.trellis/` already exists AND user runs default `trellis init --user <name>` (no `--force`, no `--skip-existing`)
-- `init()` short-circuits via `if (!isFirstInit && !options.force && !options.skipExisting) { await handleReinit(...); return; }` — main dispatch is **never executed**
-
-Both paths must capture the pre-existing `.developer` state **before** running `init_developer.py` (which writes the file), then use that snapshot to decide whether joiner generation applies.
-
-```typescript
-// Path 1 (init end) — snapshot at init() start
-const hadDeveloperFileAtStart = fs.existsSync(developerFilePath);
-// ... later, after init_developer.py:
-if (!isFirstInit && !hadDeveloperFileAtStart) {
-  createJoinerOnboardingTask(cwd, developerName);
-}
-
-// Path 2 (handleReinit) — snapshot just before init_developer.py
-const hadDeveloperFileBefore = fs.existsSync(developerFilePath);
-execSync(`${pythonCmd} ${initDeveloperScript} "${devName}"`, { ... });
-if (!hadDeveloperFileBefore) {
-  createJoinerOnboardingTask(cwd, devName);
-}
-```
-
-**Test coverage requirement**: integration tests must cover BOTH paths. The quick way to detect regressions is to run `init` without `force: true` and assert joiner-task creation — tests that all pass `{ force: true }` will miss Path 2 bugs entirely.
-
----
+Native init/reinit configure selected integrations and identity without creating
+bootstrap/joiner tasks, empty specs, workspace journals or journal gitattributes.
+Existing user content, real registry specs and optional workflows are preserved.
 
 ## Common Mistakes
 
