@@ -25,4 +25,15 @@ the upstream license and private project content. No upstream PR or npm release.
 - Existing focused runtime, archive, init, workflow and generation checks passed.
 - Existing safety checks for scoped auto-commit, index locks and context injection retained.
 - One unrelated OpenCode directory-cap test still fails on Windows; not expanded here.
-- Next: push the fork branch and apply the validated files to the research project.
+- Revision e7c50674 pushed to the user's research-light branch.
+- Validated runtime and 80 enabled entry points applied to the research project.
+- Project shared specs reduced to actual cross-package principles, with package-specific
+  algorithms and figures left in the owning package docs.
+- Project Python/TOML syntax, inline/no-auto-commit defaults and phase loading passed.
+- All 26 administrative archives now preserve prior status; 17 unfinished tasks are
+  no longer mislabeled completed. The project still has no active tasks.
+- Scientific source, experiments, existing staged changes and project HEAD were
+  preserved. The research project was not committed or pushed.
+- Additional known unrelated platform failure: Pi session-key expectation.
+  Together with the OpenCode directory-cap expectation, these remain outside scope.
+- No new test files, fixtures, journals or experiment artifacts were added.
